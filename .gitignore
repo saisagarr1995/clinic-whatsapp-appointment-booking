@@ -1,0 +1,39 @@
+# --- Secrets. Never commit these. ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- The single-prompt rebuild file. Explicitly excluded from GitHub. ---
+RECREATE_PROMPT.md
+
+# --- Local clinic data & runtime state ---
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+setup_state.json
+qrcodes/
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

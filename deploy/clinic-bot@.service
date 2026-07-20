@@ -1,0 +1,77 @@
+# systemd TEMPLATE unit — one instance per clinic.
+#
+# %i is the clinic slug. Each clinic runs as its own process, with its own
+# config, its own database and its own Meta credentials. Isolation between
+# clinics is enforced by the operating system, not by application logic.
+#
+#   sudo systemctl enable --now clinic-bot@smile-dental
+#   sudo systemctl status clinic-bot@smile-dental
+#   journalctl -u clinic-bot@smile-dental -f
+#
+# Clinics are normally managed through deploy/fleet.sh rather than by hand.
+
+[Unit]
+Description=Clinic WhatsApp Bot — %i
+Documentation=https://github.com/saisagarr1995/clinic-whatsapp-appointment-booking
+After=network-online.target
+Wants=network-online.target
+PartOf=clinic-bot.target
+
+[Service]
+Type=exec
+User=clinicbot
+Group=clinicbot
+
+# Per-clinic working directory. All relative paths in the app — the SQLite file,
+# the QR cache, clinic.yaml — therefore resolve inside this clinic's own folder,
+# which is what keeps two clinics from ever sharing state.
+WorkingDirectory=/opt/clinic-bot/clinics/%i
+
+# PORT, PUBLIC_BASE_URL and the Meta credentials all come from here.
+EnvironmentFile=/opt/clinic-bot/clinics/%i/.env
+
+ExecStart=/opt/clinic-bot/.venv/bin/uvicorn clinic_bot.main:app \
+    --host 127.0.0.1 \
+    --port ${PORT} \
+    --workers 1 \
+    --no-server-header \
+    --proxy-headers \
+    --forwarded-allow-ips 127.0.0.1
+
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=0
+TimeoutStopSec=20
+
+# --- Hardening -------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# This clinic may write ONLY to its own data directory. Even if this process
+# were fully compromised it cannot read or modify another clinic's database.
+ReadWritePaths=/opt/clinic-bot/clinics/%i/data
+
+# Keep one clinic from starving the other 49.
+MemoryMax=512M
+CPUWeight=100
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

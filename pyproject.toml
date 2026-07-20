@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clinic-bot"
+version = "1.0.0"
+description = "WhatsApp appointment booking bot for dental clinics. No AI, no recurring cost."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+# Every dependency is justified in docs/PROJECT_PLAN.md section 4.
+# Do not add a package here without adding it there first.
+dependencies = [
+    "fastapi>=0.115,<1.0",
+    "uvicorn[standard]>=0.32,<1.0",
+    "sqlalchemy>=2.0,<3.0",
+    "pydantic-settings>=2.6,<3.0",
+    "pyyaml>=6.0,<7.0",
+    "qrcode[pil]>=8.0,<9.0",
+    "jinja2>=3.1,<4.0",
+    "httpx>=0.28,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # >=9.0.3 required: PYSEC-2026-1845 affects earlier releases.
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=0.24,<2.0",
+    "pytest-cov>=6.0,<7.0",
+    "ruff>=0.8,<1.0",
+    "bandit>=1.8,<2.0",
+    "pip-audit>=2.7,<3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "C4", "SIM"]
+# S101 = assert, expected in tests.
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]
+
+[tool.coverage.run]
+source = ["src/clinic_bot"]

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Pay {{ amount_label }} · {{ clinic_name }}</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --ink: #12141a;
+    --muted: #666c7a;
+    --line: #e3e6ec;
+    --accent: #0b8f5a;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101216; --card: #191c22; --ink: #f0f2f5;
+      --muted: #99a0ae; --line: #2a2e37; --accent: #22c07d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 48px;
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 420px; margin: 0 auto; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 14px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .clinic { color: var(--muted); font-size: 14px; margin-bottom: 18px; }
+  .amount { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+  .amount-label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
+  .ref { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+  .vpa-row {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px dashed var(--line); border-radius: 10px;
+    padding: 12px 14px; margin-top: 16px;
+  }
+  .vpa { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; word-break: break-all; }
+  .copy {
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .copy:active { transform: scale(.97); }
+
+  .primary {
+    display: block; width: 100%; text-align: center; text-decoration: none;
+    background: var(--accent); color: #fff; font-weight: 600; font-size: 17px;
+    padding: 16px; border-radius: 12px; margin: 18px 0 8px;
+  }
+  .hint { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 4px; }
+
+  .apps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 14px; }
+  .app {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    text-decoration: none; color: var(--ink); font-size: 14px; font-weight: 500;
+    border: 1px solid var(--line); border-radius: 10px; padding: 13px 10px;
+    background: var(--card);
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+
+  .qr { text-align: center; }
+  .qr img {
+    width: 100%; max-width: 260px; height: auto;
+    background: #fff; padding: 10px; border-radius: 12px;
+  }
+  .steps { margin: 14px 0 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  .steps li { margin-bottom: 6px; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 22px; }
+  footer a { color: var(--accent); }
+  .paid-note {
+    background: rgba(11,143,90,.08); border: 1px solid rgba(11,143,90,.25);
+    color: var(--ink); border-radius: 10px; padding: 12px 14px; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card">
+    <h1>Appointment advance</h1>
+    <div class="clinic">{{ clinic_name }}</div>
+
+    <div class="amount-label">Amount payable</div>
+    <div class="amount">{{ amount_label }}</div>
+    <div class="ref">Reference: <strong>{{ ref }}</strong></div>
+
+    <div class="vpa-row">
+      <span class="vpa" id="vpa">{{ upi_id }}</span>
+      <button class="copy" id="copyBtn" type="button">Copy</button>
+    </div>
+
+    <a class="primary" href="{{ upi_uri }}">Pay with any UPI app</a>
+    <p class="hint">Opens your phone's UPI app chooser</p>
+
+    <div class="apps">
+      {% for app, link in app_links %}
+      <a class="app" href="{{ link }}">
+        <span class="dot" style="background: {{ app.color }}"></span>{{ app.label }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card qr">
+    <div class="amount-label" style="margin-bottom:12px">Or scan this QR</div>
+    <img src="{{ qr_url }}" alt="UPI QR code for {{ amount_label }} to {{ upi_id }}">
+    <ol class="steps" style="text-align:left">
+      <li>Open GPay, PhonePe, Paytm, CRED or BHIM</li>
+      <li>Scan this code</li>
+      <li>Confirm the amount and pay</li>
+      <li>Return to WhatsApp and tap <strong>I've Paid</strong></li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <div class="paid-note">
+      After paying, go back to WhatsApp and tap <strong>I've Paid</strong> so we can
+      confirm your appointment.
+    </div>
+  </div>
+
+  <footer>
+    Trouble paying? Call <a href="tel:{{ clinic_phone }}">{{ clinic_phone }}</a>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var btn = document.getElementById('copyBtn');
+    var vpa = document.getElementById('vpa');
+    btn.addEventListener('click', function () {
+      var text = vpa.textContent.trim();
+      function done() { btn.textContent = 'Copied'; setTimeout(function(){ btn.textContent = 'Copy'; }, 1600); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var el = document.createElement('textarea');
+        el.value = text; el.setAttribute('readonly', '');
+        el.style.position = 'absolute'; el.style.left = '-9999px';
+        document.body.appendChild(el); el.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(el);
+      }
+    });
+  })();
+</script>
+</body>
+</html>

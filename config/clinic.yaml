@@ -1,0 +1,137 @@
+# =============================================================================
+# CLINIC CONFIGURATION
+# =============================================================================
+# This is the ONLY file you need to edit to onboard a clinic.
+# `python setup.py` writes this for you interactively — hand-editing is optional.
+#
+# After changing anything here, re-seed:  python -m clinic_bot.db.seed
+# Existing bookings are never touched by a re-seed.
+# -----------------------------------------------------------------------------
+
+clinic:
+  name: "Smile Dental Clinic"
+  tagline: "Your smile, our care"
+  phone: "+919000000000"          # shown to patients under "Contact Us" / "Need Help"
+  address: "12-3-45, Road No. 4, Banjara Hills, Hyderabad 500034"
+  timezone: "Asia/Kolkata"
+
+  # Clinic-wide opening hours. Individual doctors may work a subset of these.
+  hours:
+    open: "09:00"
+    close: "20:00"
+    days: [mon, tue, wed, thu, fri, sat]   # sun omitted = closed Sunday
+    break:
+      start: "13:30"
+      end: "14:30"
+
+booking:
+  slot_minutes: 30          # appointment granularity
+  advance_days: 7           # how far ahead patients may book
+  hold_minutes: 15          # slot reservation window before payment declared
+  min_notice_minutes: 60    # no bookings starting sooner than this from now
+
+session:
+  timeout_minutes: 30       # conversation resets after this much inactivity
+
+payment:
+  upi_id: "smiledental@okhdfcbank"
+  upi_name: "Smile Dental Clinic"
+  advance_amount: 200       # advance to confirm the booking, in INR
+  currency: "INR"
+
+# -----------------------------------------------------------------------------
+# SERVICES
+# `code` is a stable identifier — never change it once bookings exist.
+# `name` must be <= 24 characters (WhatsApp list-row title limit).
+# `description` must be <= 72 characters (WhatsApp list-row description limit).
+# -----------------------------------------------------------------------------
+services:
+  - code: consultation
+    name: "General Consultation"
+    fee_from: 300
+    duration_minutes: 30
+    description: "Full dental check-up and treatment advice"
+
+  - code: cleaning
+    name: "Scaling & Polishing"
+    fee_from: 1200
+    duration_minutes: 45
+    description: "Professional cleaning to remove plaque and stains"
+
+  - code: filling
+    name: "Tooth Filling"
+    fee_from: 1500
+    duration_minutes: 45
+    description: "Composite filling for cavities"
+
+  - code: root_canal
+    name: "Root Canal (RCT)"
+    fee_from: 5000
+    duration_minutes: 60
+    description: "Single-sitting root canal treatment"
+
+  - code: extraction
+    name: "Tooth Extraction"
+    fee_from: 1000
+    duration_minutes: 30
+    description: "Simple and surgical tooth removal"
+
+  - code: braces
+    name: "Braces Consultation"
+    fee_from: 500
+    duration_minutes: 30
+    description: "Orthodontic assessment and treatment planning"
+
+  - code: whitening
+    name: "Teeth Whitening"
+    fee_from: 6000
+    duration_minutes: 60
+    description: "In-clinic professional whitening"
+
+  - code: implant
+    name: "Dental Implant"
+    fee_from: 25000
+    duration_minutes: 60
+    description: "Titanium implant consultation and placement"
+
+# -----------------------------------------------------------------------------
+# DOCTORS
+# `services` lists the service codes this doctor provides.
+# `hours` overrides clinic hours for this doctor; omit to inherit clinic hours.
+# -----------------------------------------------------------------------------
+doctors:
+  - code: dr_ramesh
+    name: "Dr. Ramesh Kumar"
+    specialization: "General Dentist"
+    services: [consultation, cleaning, filling, extraction]
+    working_days: [mon, tue, wed, thu, fri, sat]
+    hours:
+      open: "09:00"
+      close: "17:00"
+
+  - code: dr_priya
+    name: "Dr. Priya Sharma"
+    specialization: "Endodontist"
+    services: [consultation, root_canal, filling]
+    working_days: [mon, wed, fri, sat]
+    hours:
+      open: "10:00"
+      close: "18:00"
+
+  - code: dr_arjun
+    name: "Dr. Arjun Reddy"
+    specialization: "Orthodontist"
+    services: [consultation, braces, whitening]
+    working_days: [tue, thu, sat]
+    hours:
+      open: "11:00"
+      close: "20:00"
+
+  - code: dr_meera
+    name: "Dr. Meera Nair"
+    specialization: "Implantologist"
+    services: [consultation, implant, extraction]
+    working_days: [mon, tue, thu, fri]
+    hours:
+      open: "09:30"
+      close: "16:30"

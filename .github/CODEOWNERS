@@ -1,0 +1,5 @@
+# Every change requires review from the repository owner.
+# Combined with branch protection, this is what stops anyone else merging
+# anything into release/1.0 or main.
+
+* @saisagarr1995
