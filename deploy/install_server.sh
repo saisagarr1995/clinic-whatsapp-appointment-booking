@@ -141,7 +141,9 @@ log "Firewall"
 if command -v iptables >/dev/null 2>&1; then
     iptables -I INPUT -p tcp --dport 80  -j ACCEPT 2>/dev/null || true
     iptables -I INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
-    command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save >/dev/null 2>&1 || true
+    fi
 fi
 
 cat <<EOF
