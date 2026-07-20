@@ -49,8 +49,10 @@ all_slugs() {
 }
 
 clinic_port() {
-    local env_file="$(clinic_dir "$1")/.env"
-    [[ -f "$env_file" ]] && grep -E '^PORT=' "$env_file" | head -1 | cut -d= -f2
+    local env_file
+    env_file="$(clinic_dir "$1")/.env"
+    [[ -f "$env_file" ]] || return 0
+    grep -E '^PORT=' "$env_file" | head -1 | cut -d= -f2
 }
 
 next_port() {
@@ -200,7 +202,11 @@ cmd_service() {
 
     if [[ "$target" == "all" ]]; then
         for slug in $(all_slugs); do
-            systemctl "$action" "clinic-bot@${slug}" && ok "${action} ${slug}" || warn "${action} failed: ${slug}"
+            if systemctl "$action" "clinic-bot@${slug}"; then
+                ok "${action} ${slug}"
+            else
+                warn "${action} failed: ${slug}"
+            fi
         done
     else
         exists "$target" || die "No such clinic: ${target}"
@@ -315,8 +321,11 @@ cmd_deploy() {
         fi
     done
 
-    [[ "$failed" -eq 0 ]] && ok "Deploy complete, all clinics healthy." \
-                          || die "${failed} clinic(s) unhealthy after deploy."
+    if [[ "$failed" -eq 0 ]]; then
+        ok "Deploy complete, all clinics healthy."
+    else
+        die "${failed} clinic(s) unhealthy after deploy."
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -331,7 +340,9 @@ cmd_health() {
             bad=$((bad + 1))
         fi
     done
-    [[ "$bad" -eq 0 ]] || exit 1
+    if [[ "$bad" -ne 0 ]]; then
+        exit 1
+    fi
 }
 
 usage() {
