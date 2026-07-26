@@ -1,4 +1,4 @@
-"""UPI URI construction, QR generation and the payment page."""
+"""UPI URI construction and the payment page."""
 
 from __future__ import annotations
 
@@ -12,11 +12,12 @@ from clinic_bot.db.models import Booking
 from clinic_bot.db.session import session_scope
 from clinic_bot.flow import ids
 from clinic_bot.main import create_app
-from clinic_bot.payments import qr
+from clinic_bot.payments import upi
 from clinic_bot.payments.upi import UPI_APPS, build_app_links, build_upi_uri
 from clinic_bot.whatsapp.fake import FakeAdapter
 from clinic_bot.whatsapp.messages import rupees
 
+from .conftest import clinic_url
 from .test_flow_booking import book_fully
 
 # --------------------------------------------------------------------------
@@ -63,22 +64,8 @@ def test_amount_override_is_honoured(cfg):
 
 
 # --------------------------------------------------------------------------
-# QR
+# Reference handling
 # --------------------------------------------------------------------------
-
-
-def test_qr_is_a_real_png(cfg):
-    path = qr.ensure_qr(cfg, ref="SDC-ABC12")
-    assert path.exists()
-    assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-
-
-def test_qr_generation_is_cached(cfg):
-    first = qr.ensure_qr(cfg, ref="SDC-ABC12")
-    mtime = first.stat().st_mtime_ns
-    second = qr.ensure_qr(cfg, ref="SDC-ABC12")
-    assert second == first
-    assert second.stat().st_mtime_ns == mtime
 
 
 @pytest.mark.parametrize(
@@ -86,9 +73,14 @@ def test_qr_generation_is_cached(cfg):
     ["../../etc/passwd", "a/b", "SDC ABC", "", "x" * 40, "sdc-abc12", "..\\win.ini"],
 )
 def test_path_traversal_and_odd_refs_are_refused(bad_ref):
-    """Booking refs become filenames, so the shape is enforced."""
-    with pytest.raises(qr.InvalidRefError):
-        qr.qr_path(bad_ref)
+    """Booking refs go into URLs, so the shape is enforced before any DB work."""
+    with pytest.raises(upi.InvalidRefError):
+        upi.validate_ref(bad_ref)
+
+
+def test_pay_url_is_scoped_to_the_clinic():
+    url = upi.pay_url("https://example.com/c/smile", "SDC-ABC12")
+    assert url == "https://example.com/c/smile/pay/SDC-ABC12"
 
 
 # --------------------------------------------------------------------------
@@ -113,7 +105,7 @@ def _make_booking(bot):
 def test_payment_page_renders_the_details_a_patient_needs(bot, client, cfg):
     ref, amount = _make_booking(bot)
 
-    r = client.get(f"/pay/{ref}")
+    r = client.get(clinic_url(f"/pay/{ref}"))
     assert r.status_code == 200
 
     html = r.text
@@ -128,24 +120,28 @@ def test_payment_page_renders_the_details_a_patient_needs(bot, client, cfg):
 
 def test_payment_page_is_not_indexable(bot, client):
     ref, _ = _make_booking(bot)
-    r = client.get(f"/pay/{ref}")
+    r = client.get(clinic_url(f"/pay/{ref}"))
     assert "noindex" in r.headers.get("X-Robots-Tag", "").lower()
 
 
-def test_qr_endpoint_serves_a_png(bot, client):
+def test_payment_page_carries_no_qr_image(bot, client):
+    """The QR was dropped; nothing may still reference an image endpoint."""
     ref, _ = _make_booking(bot)
-    r = client.get(f"/qr/{ref}.png")
-    assert r.status_code == 200
-    assert r.headers["content-type"] == "image/png"
-    assert r.content.startswith(b"\x89PNG")
+    html = client.get(clinic_url(f"/pay/{ref}")).text
+    assert "/qr/" not in html
+    assert "<img" not in html
 
 
 def test_unknown_booking_reference_is_a_404(client):
-    assert client.get("/pay/SDC-ZZZZZ").status_code == 404
+    assert client.get(clinic_url("/pay/SDC-ZZZZZ")).status_code == 404
+
+
+def test_unknown_clinic_is_a_404(client):
+    assert client.get("/c/no-such-clinic/pay/SDC-ABC12").status_code == 404
 
 
 def test_malformed_reference_is_rejected(client):
-    assert client.get("/pay/not%20a%20ref").status_code in (400, 404)
+    assert client.get(clinic_url("/pay/not%20a%20ref")).status_code in (400, 404)
 
 
 def test_cancelled_booking_stops_accepting_payment(bot, client):
@@ -157,5 +153,5 @@ def test_cancelled_booking_stops_accepting_payment(bot, client):
     bot.pick_row(ids.P_BOOKING)
     bot.tap(ids.BTN_CANCEL_YES)
 
-    r = client.get(f"/pay/{ref}")
+    r = client.get(clinic_url(f"/pay/{ref}"))
     assert r.status_code == 410, "a cancelled booking must not keep collecting money"

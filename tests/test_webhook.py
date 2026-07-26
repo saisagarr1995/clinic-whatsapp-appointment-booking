@@ -18,6 +18,10 @@ from clinic_bot.main import create_app
 from clinic_bot.whatsapp.cloud_api import parse_webhook, verify_signature
 from clinic_bot.whatsapp.fake import FakeAdapter
 
+from .conftest import clinic_url
+
+WEBHOOK = clinic_url("/webhook")
+
 SECRET = "test-app-secret"
 VERIFY_TOKEN = "test-verify-token"
 
@@ -71,7 +75,7 @@ def client_and_adapter():
 def test_correct_verify_token_echoes_the_challenge(client_and_adapter):
     client, _ = client_and_adapter
     r = client.get(
-        "/webhook",
+        WEBHOOK,
         params={
             "hub.mode": "subscribe",
             "hub.verify_token": VERIFY_TOKEN,
@@ -85,7 +89,7 @@ def test_correct_verify_token_echoes_the_challenge(client_and_adapter):
 def test_wrong_verify_token_is_rejected(client_and_adapter):
     client, _ = client_and_adapter
     r = client.get(
-        "/webhook",
+        WEBHOOK,
         params={
             "hub.mode": "subscribe",
             "hub.verify_token": "wrong",
@@ -104,7 +108,7 @@ def test_valid_signature_is_accepted_and_the_bot_replies(client_and_adapter):
     client, adapter = client_and_adapter
     body = json.dumps(text_payload()).encode()
 
-    r = client.post("/webhook", content=body, headers={"X-Hub-Signature-256": sign(body)})
+    r = client.post(WEBHOOK, content=body, headers={"X-Hub-Signature-256": sign(body)})
 
     assert r.status_code == 200
     assert adapter.sent, "the bot should have replied"
@@ -115,7 +119,7 @@ def test_missing_signature_is_rejected(client_and_adapter):
     client, adapter = client_and_adapter
     body = json.dumps(text_payload()).encode()
 
-    r = client.post("/webhook", content=body)
+    r = client.post(WEBHOOK, content=body)
 
     assert r.status_code == 403
     assert not adapter.sent, "no message may be processed without a valid signature"
@@ -126,7 +130,7 @@ def test_forged_signature_is_rejected(client_and_adapter):
     body = json.dumps(text_payload()).encode()
 
     r = client.post(
-        "/webhook",
+        WEBHOOK,
         content=body,
         headers={"X-Hub-Signature-256": sign(body, "attacker-guessed-secret")},
     )
@@ -142,7 +146,7 @@ def test_tampered_body_invalidates_the_signature(client_and_adapter):
     signature = sign(original)
     tampered = json.dumps(text_payload(text="Book me in", msg_id="wamid.evil")).encode()
 
-    r = client.post("/webhook", content=tampered, headers={"X-Hub-Signature-256": signature})
+    r = client.post(WEBHOOK, content=tampered, headers={"X-Hub-Signature-256": signature})
 
     assert r.status_code == 403
     assert not adapter.sent
@@ -173,11 +177,11 @@ def test_a_replayed_delivery_is_processed_only_once(client_and_adapter):
     body = json.dumps(text_payload(msg_id="wamid.same")).encode()
     headers = {"X-Hub-Signature-256": sign(body)}
 
-    client.post("/webhook", content=body, headers=headers)
+    client.post(WEBHOOK, content=body, headers=headers)
     first_count = len(adapter.sent)
     assert first_count > 0
 
-    client.post("/webhook", content=body, headers=headers)
+    client.post(WEBHOOK, content=body, headers=headers)
     assert len(adapter.sent) == first_count, "the replay produced extra messages"
 
 
@@ -210,7 +214,7 @@ def test_status_callbacks_are_ignored(client_and_adapter):
     }
     body = json.dumps(payload).encode()
 
-    r = client.post("/webhook", content=body, headers={"X-Hub-Signature-256": sign(body)})
+    r = client.post(WEBHOOK, content=body, headers={"X-Hub-Signature-256": sign(body)})
 
     assert r.status_code == 200
     assert not adapter.sent, "delivery receipts must not trigger a reply"
@@ -286,3 +290,32 @@ def test_no_api_docs_are_exposed(client_and_adapter):
     client, _ = client_and_adapter
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+# --------------------------------------------------------------------------
+# Log injection
+# --------------------------------------------------------------------------
+
+
+def test_network_supplied_values_cannot_forge_log_lines():
+    """Message ids and query params reach the log; newlines must not survive.
+
+    Without this an attacker could embed a newline in a WhatsApp id and write
+    fabricated entries into the clinic's log.
+    """
+    from clinic_bot.main import _safe
+
+    forged = "wamid.1\n2026-07-26 INFO  Payment verified for SDC-AAAAA"
+    cleaned = _safe(forged)
+
+    assert "\n" not in cleaned
+    assert "\r" not in cleaned
+    assert cleaned.startswith("wamid.1")
+
+
+def test_safe_truncates_and_handles_odd_input():
+    from clinic_bot.main import _safe
+
+    assert len(_safe("x" * 500)) == 64
+    assert "\n" not in _safe("a\r\nb")
+    assert _safe(None) == "None"

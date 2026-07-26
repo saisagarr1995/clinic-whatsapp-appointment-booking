@@ -4,10 +4,16 @@
 > Any deviation requires updating this file AND `docs/PROGRESS.md` AND `RECREATE_PROMPT.md`
 > in the same commit.
 
-- **Version:** 1.0
+- **Version:** 1.1
 - **Created:** 2026-07-20
-- **Last updated:** 2026-07-20
+- **Last updated:** 2026-07-26
 - **Release branch:** `release/1.0`
+
+> **2026-07-26 — amendment notice.** CAB-0014 changed four locked decisions at the
+> user's direction: the laptop became a supported host, the fleet moved to one
+> process with a database per clinic, the UPI QR was dropped, and an offline
+> simulator was added. Each amendment is recorded inline below at the decision it
+> changes. Nothing else in this plan was re-litigated.
 
 ---
 
@@ -24,7 +30,10 @@ AI/LLM inference.
 ### Non-goals (explicitly out of scope for 1.0)
 - No AI, LLM, or NLP. The bot is a deterministic finite state machine. **AI cost = ₹0.**
 - No payment gateway integration or automated payment reconciliation. Payment is UPI
-  peer-to-peer; the patient self-declares via an "I've Paid" button and clinic staff verify.
+  peer-to-peer; the patient self-declares via an "I've Paid" button, supplies the UPI
+  reference, and **clinic staff verify it against their own bank statement** using
+  `scripts/clinic_admin.py`. See §3.1.1 — this is the one place the product depends on a
+  human, and it cannot be removed without a payment gateway.
 - No admin web dashboard (deferred — see §9 Future work).
 - No shared-database multi-tenancy. **One process + one database file per clinic**, with
   many clinics on one server. See §12.
@@ -45,7 +54,15 @@ patient-initiated conversations, so the WhatsApp cost remains ₹0 at full scale
 | D1 | **Meta WhatsApp Cloud API** as transport, via the open-source `pywa` client | Only option that is simultaneously ToS-compliant, ban-safe, supports interactive reply buttons + list messages, and free for user-initiated conversations. Reverse-engineered libraries (`neonize`, `whatsmeow`) violate WhatsApp ToS and get numbers banned — unacceptable for a product being sold. |
 | D2 | **All project code and dependencies are open source** (MIT/Apache/BSD only) | User requirement. Verified per-package in §4. |
 | D3 | **Python 3.12 + FastAPI + SQLAlchemy + SQLite** | Lean, no server dependencies, single-file DB suits a single clinic. |
-| D4 | **UPI: QR image + UPI ID text + self-hosted payment page** | WhatsApp will not open a `upi://` deep link from chat text. A small page served by our own FastAPI app carries GPay/PhonePe/Paytm/CRED intent buttons. |
+| D4 | **UPI: UPI ID text + self-hosted payment page** | WhatsApp will not open a `upi://` deep link from chat text. A small page served by our own FastAPI app carries GPay/PhonePe/Paytm/CRED intent buttons. |
+
+> **D4 amended 2026-07-26 (CAB-0014): the QR image was removed.** The patient pays
+> from the same handset that holds the chat, so the app-chooser page and the
+> copyable VPA already complete the journey; the QR only helped someone scanning
+> from a *second* device. Dropping it removed `qrcode[pil]` and with it **Pillow**,
+> the heaviest dependency in the tree — the single largest memory saving available,
+> which matters now that the target host is a laptop. Accepted cost: no scan-to-pay
+> from another device.
 | D5 | **cloudflared quick tunnel** for local webhook exposure | Free, no account, no card. |
 | D6 | **`config/clinic.yaml` + SQLite seed** for clinic onboarding | Matches the one-time-setup sellable goal. |
 | D7 | **Transport abstraction layer** (`whatsapp/base.py`) | The bot core never imports `pywa` directly, so a second adapter can be added without touching flow logic. |
@@ -55,13 +72,44 @@ patient-initiated conversations, so the WhatsApp cost remains ₹0 at full scale
 | D11 | **Caddy + Let's Encrypt + DuckDNS** for HTTPS | Meta requires a valid HTTPS certificate on the webhook. Caddy obtains and renews one automatically, free. |
 | D12 | **systemd** for process supervision | Auto-restart on crash and auto-start on reboot, with no extra dependency — it is already on the VM. |
 
-### Nothing runs on the developer's laptop
-The laptop writes code and pushes to GitHub. GitHub Actions deploys to the VM. The clinic's
-bot is alive whether or not the laptop is switched on. `PUBLIC_BASE_URL` is the VM's
-permanent DuckDNS HTTPS URL — the cloudflared tunnel (D5) is retained **only** as an
-optional convenience for local flow testing, and is not part of the production path.
+### ~~Nothing runs on the developer's laptop~~ — amended 2026-07-26 (CAB-0014)
 
-| D13 | **Process + database per clinic**, not shared-database multi-tenancy | Isolation is enforced by the OS rather than by a `WHERE clinic_id = ...` that a future change could omit. A single missed filter in a shared design would leak one clinic's patient medical data to another — unacceptable for health data in a product being sold. Also keeps the already-written, already-tested single-clinic code unchanged. |
+The original rule read: *"Nothing runs on the developer's laptop. The laptop writes
+code and pushes to GitHub; GitHub Actions deploys to the VM."* **That is no longer
+absolute.** At the user's direction the laptop is now a supported host, so the
+product can be validated and demonstrated without any cloud account existing.
+
+- **Laptop hosting** — `docs/LOCAL_HOSTING.md`. Public HTTPS via **Tailscale Funnel**
+  (free, no domain, no card, stable across reboots, BSD-3 client). Auto-start via
+  Windows Task Scheduler; `PUBLIC_BASE_URL` is the `*.ts.net` address.
+- **VM hosting (D9)** — still the recommendation for clinics with real patients.
+  Unchanged, and the code is identical; migrating is copying `data/clinics/*.db`.
+
+The laptop's availability limits are stated plainly in `LOCAL_HOSTING.md` §6 and
+must be repeated to any clinic that relies on it: Windows Update reboots, sleep,
+and home power/internet cuts all take every clinic offline.
+
+**D5 (cloudflared) is superseded for this purpose** by Tailscale Funnel, because a
+quick tunnel's URL changes on every restart and the Meta webhook URL is registered
+only once. cloudflared remains valid for throwaway testing.
+
+| D13 | **Database per clinic**, not shared-database multi-tenancy | Isolation is enforced by the file boundary rather than by a `WHERE clinic_id = ...` that a future change could omit. A single missed filter in a shared design would leak one clinic's patient medical data to another — unacceptable for health data in a product being sold. |
+
+> **D13 amended 2026-07-26 (CAB-0014): process-per-clinic → one process, database
+> per clinic.** The rationale is preserved — there is still no shared table and
+> still no `WHERE clinic_id` anywhere — but the fleet now runs in a single process
+> that resolves the clinic from the URL. Reason: the host is a laptop, and one
+> process per clinic costs ~85 MB each. **Measured: 85 MB for one clinic, 87 MB for
+> five** — about 0.4 MB per additional clinic, versus ~425 MB for five processes.
+>
+> What is given up: OS-level isolation. One crash now affects every clinic, and a
+> bug that ignored the clinic context could in principle cross clinics. That risk is
+> covered by `tests/test_multi_clinic.py`, which proves a booking in one clinic is
+> invisible to another and that a webhook signature valid for one clinic is rejected
+> by every other. **If those tests are ever weakened, this decision must be revisited.**
+>
+> Credentials are per clinic (`config/secrets/<slug>.env`), so the Meta app secret
+> differs per clinic and cross-clinic webhook forgery fails at the signature check.
 | D14 | **Path-based routing** (`/c/<slug>/…`), not per-clinic subdomains | One TLS certificate, no wildcard-DNS complexity, and `PUBLIC_BASE_URL` simply carries the prefix — so no application code has to know about routing. |
 
 ### Recurring cost
@@ -123,14 +171,42 @@ SUMMARY       full booking summary
      buttons: [Confirm] [Change Details]
  ├─ "Change Details" ──► ASK_SERVICE   (name retained, booking draft reset)
  └─ "Confirm"        ──► PAYMENT
-                          msg 1: confirmation + UPI ID + UPI name + QR image
+                          msg 1: confirmation + UPI ID + UPI name
                                  + link to payment page (app chooser)
                           msg 2: buttons [I've Paid] [Need Help]
+                          (the QR image was removed 2026-07-26 — see D4)
 
 PAYMENT
- ├─ "I've Paid"  ──► PAID     (thank-you/greeting, booking marked AWAITING_VERIFICATION)
+ ├─ "I've Paid"  ──► ASK_UTR  (booking marked AWAITING_VERIFICATION immediately)
+ │                    "Type the UPI reference number"  + [Skip]
+ │      ├─ valid reference ──► PAID  (stored for staff to match)
+ │      ├─ [Skip]           ──► PAID
+ │      └─ anything else    ──► re-prompt, never dead-ends
  └─ "Need Help"  ──► HELP     (clinic mobile number) → [I've Paid]
+
+PAID    acknowledges the CLAIM only: "your payment is being verified".
+        The bot must never tell a patient their payment is confirmed.
 ```
+
+### 3.1.1 Payment verification — the boundary of what the bot can know
+
+There is no payment gateway (§1 non-goals), so **nothing in this system can observe
+that money moved.** "I've Paid" is a patient claim, and the UPI reference is
+patient-typed text. Neither is proof.
+
+`CONFIRMED` is therefore reachable *only* through a human at the clinic comparing
+the reference against the clinic's own bank/UPI statement:
+
+```
+python scripts/clinic_admin.py payments <slug>   # queue, oldest wait first
+python scripts/clinic_admin.py confirm  <slug> <REF>
+python scripts/clinic_admin.py reject   <slug> <REF>   # frees the slot
+```
+
+**A declared-but-unverified booking keeps its slot and never auto-expires.** That is
+deliberate: a patient who genuinely paid must not lose their appointment to a timer.
+The accepted cost is that a false claim occupies a slot until staff review it, which
+is why the queue exists and is sorted oldest-first. `reject` frees the slot at once.
 
 ### 3.2 Booking lifecycle
 
@@ -163,8 +239,8 @@ Nothing is installed that is not listed here.
 | `sqlalchemy` | MIT | ORM over SQLite. |
 | `pydantic-settings` | MIT | Typed env/secret loading. |
 | `pyyaml` | MIT | Parse `clinic.yaml`. |
-| `qrcode[pil]` | BSD-3 | Generate the UPI QR locally (no third-party QR service = no data leak). |
-| `jinja2` | BSD-3 | Payment page template. |
+| `jinja2` | BSD-3 | Payment page and simulator templates. |
+| `tzdata` | Apache-2.0 | **Added 2026-07-26.** Windows ships no IANA time zone database, so `ZoneInfo("Asia/Kolkata")` raises and the clinic timezone silently fell back to machine-local time — every slot and hold expiry computed in the wrong zone. This is the standard, CPython-documented fix. |
 | `httpx` | BSD-3 | Outbound Graph API calls. |
 
 **Zero-cost guarantee.** The bot only ever replies to a patient-initiated message, which
@@ -185,7 +261,13 @@ to Future Work (§9). Any change that sends an unprompted message to a patient b
 
 **Explicitly NOT installed:** any AI/LLM SDK, `requests` (httpx covers it), `black`,
 `flake8`, `isort` (ruff covers all three), `celery`/`redis` (asyncio task suffices),
-`python-dotenv` (pydantic-settings covers it), `pywa` (see below), `alembic` (see below).
+`python-dotenv` (pydantic-settings covers it), `pywa` (see below), `alembic` (see below),
+`qrcode[pil]` (removed 2026-07-26, see D4).
+
+**Why `qrcode[pil]` was removed (2026-07-26).** It pulled in Pillow, a large native
+imaging library, to render one small PNG. With the QR dropped (D4) neither is needed.
+The per-clinic secrets loader is stdlib-only for the same reason: `python-dotenv` is
+not a declared dependency and must not become one for eight lines of parsing.
 
 **Why `pywa` was dropped (2026-07-20).** The Cloud API surface we need is four JSON
 message shapes plus an HMAC-SHA256 signature check. Writing it directly against the
@@ -213,27 +295,33 @@ clinic-whatsapp-appointment-booking/
 │       ├── git-workflow/SKILL.md
 │       └── testing/SKILL.md
 ├── .github/workflows/ci.yml
-├── config/clinic.yaml                   # the ONLY file a new clinic edits
+├── config/
+│   ├── clinics.yaml                     # THE FLEET REGISTRY — add a clinic here
+│   ├── clinic.yaml                      # the first clinic's details
+│   ├── clinics/<slug>.yaml              # each additional clinic
+│   └── secrets/<slug>.env               # GITIGNORED — per-clinic Meta credentials
+├── data/clinics/<slug>.db               # GITIGNORED — one database per clinic
 ├── docs/
 │   ├── PROJECT_PLAN.md                  # this file
 │   ├── PROGRESS.md                      # step-by-step build log
 │   ├── SESSION_STATE.md                 # cross-session context handoff
-│   ├── ARCHITECTURE.md
-│   └── SETUP.md                         # clinic operator runbook
+│   ├── LOCAL_HOSTING.md                 # laptop runbook (CAB-0014)
+│   └── TWO_PHONE_TEST.md
 ├── RECREATE_PROMPT.md                   # GITIGNORED — single-prompt rebuild
 ├── scripts/
-│   ├── setup.ps1 / setup.sh
-│   ├── seed.py
-│   └── dev_tunnel.ps1
+│   ├── clinic_admin.py                  # add / list / seed / check / webhook
+│   ├── run_local.ps1                    # start the fleet
+│   └── install_autostart.ps1            # Task Scheduler registration
 ├── src/clinic_bot/
 │   ├── settings.py
-│   ├── main.py
+│   ├── registry.py                      # the fleet: slug -> Clinic
+│   ├── main.py                          # /c/{slug}/webhook, /health
 │   ├── db/            models.py session.py seed.py
-│   ├── whatsapp/      base.py cloud_api.py messages.py
-│   ├── flow/          states.py session_store.py router.py handlers/
-│   ├── scheduling/    slots.py
-│   ├── payments/      upi.py qr.py
-│   └── web/           routes.py templates/pay.html
+│   ├── whatsapp/      base.py cloud_api.py messages.py fake.py
+│   ├── flow/          states.py session_store.py router.py views.py
+│   ├── scheduling/    slots.py clock.py
+│   ├── payments/      upi.py
+│   └── web/           routes.py sim.py templates/{pay,sim}.html
 ├── tests/
 ├── pyproject.toml
 ├── .env.example
@@ -261,6 +349,7 @@ Each row is one `feature/CAB-XXXX` branch cut **from `release/1.0`**, merged bac
 | CAB-0010 | `feature/CAB-0010` | CI workflow, branch protection, `SECURITY.md`, CODEOWNERS | Direct push to `main` rejected |
 | CAB-0011 | `feature/CAB-0011` | One-command clinic onboarding wizard (§10) | A non-technical operator gets from clone to live bot without editing code |
 | CAB-0012 | `feature/CAB-0012` | Production deployment: systemd unit, Caddy, backups, deploy pipeline (§11) | Bot survives a VM reboot and a redeploy without losing bookings |
+| CAB-0014 | `feature/CAB-0014` | Laptop hosting: clinic registry, one process + DB per clinic, offline simulator, QR removal, CodeQL + Dependabot | Fleet serves many clinics from one process; cross-clinic isolation proven by test; full flow validated with no Meta account |
 
 ---
 
@@ -348,3 +437,5 @@ repeat until green. Failures are recorded in `PROGRESS.md`, never silently patch
 | Date | Change |
 |------|--------|
 | 2026-07-20 | Initial plan created and locked. |
+| 2026-07-26 | **CAB-0015.** Payment verification closed: `CONFIRMED` was unreachable — no code path set it and an unverified claim held a slot forever with no staff tool. Added UPI-reference capture (`ASK_UTR`), `confirm`/`reject` staff commands and §3.1.1. Fixed a latent timezone bug where a blanket `except Exception` hid `ZoneInfoNotFoundError` on Windows, silently using machine-local time; added `tzdata` and validation at config load. Removed dead code (`ImageMessage`, dead `Settings` members) and the superseded process-per-clinic deploy assets. 180 → 202 tests. |
+| 2026-07-26 | **CAB-0014.** Four locked decisions amended at the user's direction: §2 "nothing runs on the laptop" (laptop is now a supported host, via Tailscale Funnel); D13 (process-per-clinic → one process, database per clinic, measured 85→87 MB for 1→5 clinics); D4 (UPI QR removed, `qrcode[pil]` and Pillow dropped); D5 superseded by Tailscale Funnel for stable webhook URLs. Added `config/clinics.yaml` fleet registry, per-clinic secrets, path-scoped `/c/<slug>/` routing, a gated offline simulator, CodeQL and Dependabot. 180 tests. |

@@ -18,8 +18,10 @@ dependencies = [
     "sqlalchemy>=2.0,<3.0",
     "pydantic-settings>=2.6,<3.0",
     "pyyaml>=6.0,<7.0",
-    "qrcode[pil]>=8.0,<9.0",
     "jinja2>=3.1,<4.0",
+    # Windows ships no IANA time zone database, so zoneinfo cannot resolve
+    # "Asia/Kolkata" without this. See PROJECT_PLAN.md section 4.
+    "tzdata>=2024.1",
     "httpx>=0.28,<1.0",
 ]
 
@@ -55,6 +57,14 @@ ignore = ["S101"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
+# B008 flags `Depends(...)` in a default argument. That is the documented FastAPI
+# dependency-injection form, evaluated once at import by design, so the warning
+# does not apply to route handlers.
+"src/clinic_bot/main.py" = ["B008"]
+"src/clinic_bot/web/routes.py" = ["B008"]
+"src/clinic_bot/web/sim.py" = ["B008"]
+# The admin CLI imports after a sys.path insert so it runs without installation.
+"scripts/clinic_admin.py" = ["E402"]
 
 [tool.coverage.run]
 source = ["src/clinic_bot"]

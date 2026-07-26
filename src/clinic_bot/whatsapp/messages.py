@@ -132,18 +132,18 @@ def contact(cfg: ClinicConfig) -> str:
     return "\n".join(parts)
 
 
-BOOKING_MENU = "What would you like to do?"
+BOOKING_MENU = "📅 What would you like to do?"
 
 # --- Book new ---
 BOOK_INTRO = "Great! Let's get you booked in. 😊"
-ASK_NAME = "May I have your full name please?"
+ASK_NAME = "👤 May I have your full name please?"
 
 
 def thank_you_name(name: str) -> str:
-    return f"Thank you, *{name}*!"
+    return f"Thank you, *{name}*! 🙏"
 
 
-ASK_SERVICE = "Which service do you need today?"
+ASK_SERVICE = "🦷 Which service do you need today?"
 VIEW_SERVICES_BTN = "View Services"
 SERVICES_LIST_HEADER = "Our Services"
 SERVICES_LIST_BODY = "Tap below to see all treatments and pick the one you need."
@@ -151,7 +151,7 @@ SERVICES_SECTION = "Treatments"
 
 
 def ask_doctor(service_name: str) -> str:
-    return f"You selected *{service_name}*.\n\nPlease choose your preferred doctor:"
+    return f"✅ You selected *{service_name}*.\n\n👨‍⚕️ Please choose your preferred doctor:"
 
 
 DOCTORS_LIST_BTN = "View Doctors"
@@ -160,7 +160,7 @@ DOCTORS_SECTION = "Doctors"
 
 
 def ask_date(doctor_name: str) -> str:
-    return f"You selected *{doctor_name}*.\n\nPlease choose a date:"
+    return f"✅ You selected *{doctor_name}*.\n\n📅 Please choose a date:"
 
 
 DATES_LIST_BTN = "View Dates"
@@ -169,7 +169,7 @@ DATES_SECTION = "Next available"
 
 
 def ask_slot(doctor_name: str, date_label: str) -> str:
-    return f"*{doctor_name}* on *{date_label}*.\n\nPlease choose a time slot:"
+    return f"✅ *{doctor_name}* on *{date_label}*.\n\n🕐 Please choose a time that suits you:"
 
 
 SLOTS_LIST_BTN = "View Timings"
@@ -220,44 +220,73 @@ def payment_instructions(cfg: ClinicConfig, ref: str, pay_url: str) -> str:
             f"To confirm, please pay the advance of *{rupees(p.advance_amount)}*.",
             "",
             "💳 *UPI Details*",
-            f"UPI ID: `{p.upi_id}`",
-            f"Name: {p.upi_name}",
-            f"Amount: {rupees(p.advance_amount)}",
+            # No backticks: WhatsApp only renders monospace for TRIPLE backticks,
+            # so a single pair would show up literally in the patient's chat.
+            f"🏦 UPI ID: *{p.upi_id}*",
+            f"👤 Name: {p.upi_name}",
+            f"💵 Amount: {rupees(p.advance_amount)}",
             "",
             f"👉 *Tap to pay:* {pay_url}",
             "",
-            "You can also scan the QR code above with any UPI app "
-            "(GPay, PhonePe, Paytm, CRED, BHIM).",
+            (
+                "That link opens GPay, PhonePe, Paytm, CRED or BHIM with the amount "
+                "already filled in. You can also pay the UPI ID above directly."
+            ),
             "",
             f"⏳ This slot is held for {cfg.booking.hold_minutes} minutes.",
         ]
     )
 
 
-QR_CAPTION = "Scan to pay with any UPI app"
 PAYMENT_CTA = "Once you have paid, tap *I've Paid* below."
+
+# --- Payment reference (UTR) ---
+ASK_UTR = (
+    "Almost done! 🙏\n\n"
+    "Please type the *UPI reference number* from your payment app "
+    "(also called UTR or transaction ID — usually 12 digits).\n\n"
+    "It appears on the payment success screen, and it lets our team match "
+    "your payment quickly.\n\n"
+    "If you cannot find it, tap *Skip* — we will still verify manually."
+)
+UTR_INVALID = (
+    "That does not look like a UPI reference number. It is usually 12 digits, "
+    "shown on your payment success screen.\n\n"
+    "Please type it again, or tap *Skip*."
+)
+UTR_SKIP_BTN = "Skip"
 
 
 def paid_thanks(cfg: ClinicConfig, *, patient_name: str, ref: str, starts_at: dt.datetime,
-                doctor_name: str, today: dt.date) -> str:
-    return "\n".join(
-        [
-            f"🎉 *Thank you, {patient_name}!*",
-            "",
-            "Your appointment is booked. We look forward to seeing you! 😊",
-            "",
-            f"🔖 *Reference:* {ref}",
-            f"👨‍⚕️ *Doctor:* {doctor_name}",
-            f"📅 *Date:* {fmt_date(starts_at.date(), today=today)}",
-            f"🕐 *Time:* {fmt_time(starts_at)}",
-            f"📍 {cfg.clinic.address}",
-            "",
-            "_Our team will verify your payment shortly. "
-            "Please arrive 10 minutes early._",
-            "",
-            f"Need anything? Call us on {cfg.clinic.phone}",
-        ]
-    )
+                doctor_name: str, today: dt.date, payment_ref: str = "") -> str:
+    """Acknowledge the declaration WITHOUT claiming the payment is confirmed.
+
+    The clinic verifies against its own bank statement; saying "booked and
+    confirmed" here would be a lie the patient could reasonably rely on.
+    """
+    lines = [
+        f"🙏 *Thank you, {patient_name}!*",
+        "",
+        "Your slot is reserved and your payment is being verified.",
+        "",
+        f"🔖 *Reference:* {ref}",
+        f"👨‍⚕️ *Doctor:* {doctor_name}",
+        f"📅 *Date:* {fmt_date(starts_at.date(), today=today)}",
+        f"🕐 *Time:* {fmt_time(starts_at)}",
+    ]
+    if payment_ref:
+        lines.append(f"💳 *Your UPI reference:* {payment_ref}")
+    lines += [
+        f"📍 {cfg.clinic.address}",
+        "",
+        (
+            "_Our team will check your payment and confirm this appointment. "
+            "Please arrive 10 minutes early._"
+        ),
+        "",
+        f"Any question? Call us on {cfg.clinic.phone}",
+    ]
+    return "\n".join(lines)
 
 
 def need_help(cfg: ClinicConfig) -> str:

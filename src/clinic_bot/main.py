@@ -1,13 +1,20 @@
-"""FastAPI application: the WhatsApp webhook plus the patient payment pages.
+"""FastAPI application: the WhatsApp webhooks plus the patient payment pages.
+
+One process serves the whole clinic fleet. Every patient-facing route is scoped
+to a clinic slug — /c/{slug}/… — and resolves to that clinic's own config,
+database and Meta credentials.
 
 SECURITY
 --------
-Two independent checks guard the webhook:
-  * GET  — Meta's subscription handshake must present our verify token.
+Two independent checks guard each webhook:
+  * GET  — Meta's subscription handshake must present THAT CLINIC's verify token.
   * POST — every payload must carry a valid X-Hub-Signature-256 HMAC of the raw
-           body, computed with the app secret. Without this, anyone who learns
-           the URL could inject fake patient messages and create bookings.
-Signature verification is never skipped outside tests.
+           body, computed with THAT CLINIC's app secret. Without this, anyone who
+           learns the URL could inject fake patient messages and create bookings.
+
+Because the secret is per clinic, a signature that is valid for one clinic is
+rejected by every other clinic in the fleet. Signature verification is never
+skipped outside tests.
 """
 
 from __future__ import annotations
@@ -16,14 +23,12 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import IntegrityError
 
-from clinic_bot.clinic_config import ConfigError, get_clinic_config
 from clinic_bot.db.models import ProcessedMessage
-from clinic_bot.db.session import init_db, session_scope
-from clinic_bot.flow.router import Router
+from clinic_bot.registry import Clinic, clinic_dependency, get_registry, validate_all
 from clinic_bot.settings import get_settings
 from clinic_bot.web.routes import router as web_router
 from clinic_bot.whatsapp.base import InboundMessage
@@ -42,34 +47,53 @@ def _configure_logging() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _configure_logging()
-    init_db()
-
     settings = get_settings()
-    try:
-        cfg = get_clinic_config()
-        log.info("Clinic loaded: %s (%d services, %d doctors)",
-                 cfg.clinic.name, len(cfg.services), len(cfg.doctors))
-    except ConfigError:
-        log.exception("clinic.yaml failed to load — run `python setup.py`")
-        raise
 
-    missing = settings.missing_credentials()
-    if missing and not settings.testing:
-        # Not fatal: the payment pages and self-test still work. But say so loudly.
-        log.warning(
-            "Missing WhatsApp credentials: %s. The bot cannot send messages until "
-            "these are set in .env. Run `python setup.py` to configure.",
-            ", ".join(missing),
+    clinics = get_registry()
+
+    # Fail loudly at startup if any clinic's YAML is broken — the operator can
+    # still fix it now; at 2am with a patient waiting they cannot.
+    problems = validate_all()
+    if problems:
+        for slug, error in problems:
+            log.error("Clinic %s has an invalid config:\n%s", slug, error)
+        raise RuntimeError(
+            f"{len(problems)} clinic config(s) failed to load: "
+            f"{', '.join(slug for slug, _ in problems)}"
         )
 
-    if app.state.adapter is None:
-        app.state.adapter = CloudApiAdapter(settings)
+    override = app.state.adapter  # a test may inject one fake for the whole fleet
+
+    for slug, clinic in clinics.items():
+        clinic.init_db()
+        cfg = clinic.config
+        log.info(
+            "Clinic %-12s %s (%d services, %d doctors) -> %s",
+            slug, cfg.clinic.name, len(cfg.services), len(cfg.doctors), clinic.db_url,
+        )
+
+        app.state.adapters[slug] = override or CloudApiAdapter(clinic.credentials)
+
+        missing = clinic.credentials.missing()
+        if missing and not settings.testing:
+            # Not fatal: the payment page and the simulator still work. But say so.
+            log.warning(
+                "Clinic %s is missing %s — it cannot send WhatsApp messages until "
+                "these are set in config/secrets/%s.env",
+                slug, ", ".join(missing), slug,
+            )
+
+    if settings.simulator:
+        log.warning(
+            "SIMULATOR MODE IS ON — /c/{slug}/sim accepts unsigned messages. "
+            "Never enable this on a public deployment."
+        )
 
     yield
 
-    adapter = app.state.adapter
-    if hasattr(adapter, "close"):
-        adapter.close()
+    for adapter in app.state.adapters.values():
+        if hasattr(adapter, "close"):
+            adapter.close()
 
 
 def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
@@ -82,62 +106,106 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
         lifespan=lifespan,
     )
     app.state.adapter = adapter
+    app.state.adapters = {}
     app.include_router(web_router)
 
     settings = get_settings()
 
+    if settings.simulator:
+        from clinic_bot.web.sim import router as sim_router
+
+        app.include_router(sim_router)
+
     # ------------------------------------------------------------------
-    # Health
+    # Health — fleet-wide
     # ------------------------------------------------------------------
 
     @app.get("/health", include_in_schema=False)
     def health() -> JSONResponse:
-        missing = settings.missing_credentials()
-        try:
-            cfg = get_clinic_config()
-            clinic_ok, clinic_name = True, cfg.clinic.name
-        except ConfigError:
-            clinic_ok, clinic_name = False, None
+        """Fleet status.
 
-        healthy = clinic_ok and not missing
+        This endpoint is PUBLIC — it is reachable through the tunnel by anyone who
+        guesses the URL. Exception text is therefore logged server-side and never
+        returned: a config or registry error would otherwise leak filesystem paths
+        and internal structure to an unauthenticated caller.
+        """
+        try:
+            clinics = get_registry()
+        except Exception:  # registry itself is broken
+            log.exception("Registry failed to load while serving /health")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "down", "error": "registry unavailable — see server log"},
+            )
+
+        report = []
+        healthy = True
+        for slug, clinic in clinics.items():
+            try:
+                _ = clinic.config  # property access performs the load
+                config_ok = True
+            except Exception:
+                log.exception("Clinic %s has an invalid config", slug)
+                config_ok = False
+
+            missing = clinic.credentials.missing()
+            # In simulator mode absent Meta credentials are expected, not a fault.
+            live_ok = config_ok and (not missing or get_settings().simulator)
+            healthy = healthy and live_ok
+
+            entry = {
+                "slug": slug,
+                "name": clinic.name,
+                "config_loaded": config_ok,
+                "missing_credentials": missing,
+                "can_send_whatsapp": not missing,
+            }
+            if not config_ok:
+                entry["error"] = "config invalid — see server log"
+            report.append(entry)
+
         return JSONResponse(
             status_code=200 if healthy else 503,
             content={
                 "status": "ok" if healthy else "degraded",
-                "clinic": clinic_name,
-                "clinic_config_loaded": clinic_ok,
-                "missing_credentials": missing,
+                "simulator": get_settings().simulator,
+                "clinics": report,
             },
         )
 
     # ------------------------------------------------------------------
-    # Webhook
+    # Webhook — one per clinic
     # ------------------------------------------------------------------
 
-    @app.get("/webhook", include_in_schema=False)
-    def verify(request: Request) -> Response:
-        """Meta's subscription handshake."""
+    @app.get("/c/{slug}/webhook", include_in_schema=False)
+    def verify(request: Request, clinic: Clinic = Depends(clinic_dependency)) -> Response:
+        """Meta's subscription handshake, checked against this clinic's token."""
         params = request.query_params
         mode = params.get("hub.mode")
         token = params.get("hub.verify_token")
         challenge = params.get("hub.challenge", "")
 
-        expected = settings.whatsapp_verify_token
+        expected = clinic.credentials.verify_token
         if mode == "subscribe" and expected and token == expected:
-            log.info("Webhook verified by Meta")
+            log.info("Webhook verified by Meta for clinic %s", clinic.slug)
             return PlainTextResponse(challenge, status_code=200)
 
-        log.warning("Webhook verification rejected (mode=%s)", mode)
+        # `mode` is a raw query parameter — sanitize before it reaches the log.
+        log.warning("Webhook verification rejected for %s (mode=%s)", clinic.slug, _safe(mode))
         return PlainTextResponse("Forbidden", status_code=403)
 
-    @app.post("/webhook", include_in_schema=False)
-    async def receive(request: Request, background: BackgroundTasks) -> Response:
+    @app.post("/c/{slug}/webhook", include_in_schema=False)
+    async def receive(
+        request: Request,
+        background: BackgroundTasks,
+        clinic: Clinic = Depends(clinic_dependency),
+    ) -> Response:
         raw = await request.body()
 
         if not verify_signature(
-            settings.whatsapp_app_secret, raw, request.headers.get("X-Hub-Signature-256")
+            clinic.credentials.app_secret, raw, request.headers.get("X-Hub-Signature-256")
         ):
-            log.warning("Rejected webhook with an invalid signature")
+            log.warning("Rejected webhook with an invalid signature for %s", clinic.slug)
             return PlainTextResponse("Forbidden", status_code=403)
 
         try:
@@ -149,14 +217,14 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
 
         # Claim message ids synchronously, BEFORE returning 200. Meta retries until
         # it gets a 200, so claiming here is what makes a retry a no-op instead of
-        # a duplicate booking.
+        # a duplicate booking. The claim lives in this clinic's own database.
         fresh: list[InboundMessage] = []
         for item in inbounds:
-            if _claim(item["message_id"]):
+            if _claim(clinic, item["message_id"]):
                 fresh.append(InboundMessage(**item))
 
         for inbound in fresh:
-            background.add_task(_process, app, inbound)
+            background.add_task(_process, app, clinic, inbound)
 
         # Always 200 once the signature is valid, so Meta stops retrying.
         return PlainTextResponse("EVENT_RECEIVED", status_code=200)
@@ -164,20 +232,39 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
     return app
 
 
-def _claim(message_id: str) -> bool:
+def _safe(value: object, limit: int = 64) -> str:
+    """Make a network-supplied value safe to write into a log line.
+
+    Message ids, WhatsApp ids and query parameters all arrive from outside.
+    Without stripping line breaks an attacker could inject fabricated log
+    entries by embedding a newline in a value we log.
+
+    The newline replacements are written explicitly, in this order, because that
+    is the form static analysers recognise as a log-injection sanitizer; a
+    generator over `str.isprintable` is equivalent at runtime but opaque to them.
+    """
+    text = str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    text = "".join(ch for ch in text if ch.isprintable())
+    return text[:limit]
+
+
+def _claim(clinic: Clinic, message_id: str) -> bool:
     """Record a message id. Returns False if it was already processed."""
     if not message_id:
         return False
     try:
-        with session_scope() as db:
+        with clinic.session() as db:
             db.add(ProcessedMessage(message_id=message_id))
     except IntegrityError:
-        log.info("Duplicate webhook delivery for %s — ignoring", message_id)
+        log.info(
+            "Duplicate webhook delivery for %s (%s) — ignoring",
+            _safe(message_id), clinic.slug,
+        )
         return False
     return True
 
 
-def _process(app: FastAPI, inbound: InboundMessage) -> None:
+def _process(app: FastAPI, clinic: Clinic, inbound: InboundMessage) -> None:
     """Run the state machine and deliver the reply.
 
     Runs after the 200 has been returned to Meta, so a slow send never causes a
@@ -186,19 +273,20 @@ def _process(app: FastAPI, inbound: InboundMessage) -> None:
     from clinic_bot.whatsapp import messages as M
     from clinic_bot.whatsapp.base import Reply, TextMessage
 
+    adapter = app.state.adapters.get(clinic.slug)
     try:
-        cfg = get_clinic_config()
-        router = Router(cfg, get_settings())
-        with session_scope() as db:
+        router = clinic.router()
+        with clinic.session() as db:
             reply = router.handle(db, inbound)
-        app.state.adapter.send_all(reply)
+        adapter.send_all(reply)
     except Exception:
-        log.exception("Failed handling message %s from %s", inbound.message_id, inbound.wa_id)
+        log.exception(
+            "Failed handling message %s from %s (clinic %s)",
+            _safe(inbound.message_id), _safe(inbound.wa_id), clinic.slug,
+        )
         # Never leave the patient staring at silence.
         try:
-            app.state.adapter.send_all(
-                Reply([TextMessage(to=inbound.wa_id, body=M.GENERIC_ERROR)])
-            )
+            adapter.send_all(Reply([TextMessage(to=inbound.wa_id, body=M.GENERIC_ERROR)]))
         except Exception:
             log.exception("Could not deliver the error notice either")
 

@@ -22,6 +22,8 @@ BTN_CHANGE = "btn_change"
 
 BTN_PAID = "btn_paid"
 BTN_HELP = "btn_help"
+#: Lets a patient past the UPI-reference prompt without typing one.
+BTN_SKIP_UTR = "btn_skip_utr"
 
 BTN_MAIN_MENU = "btn_main_menu"
 BTN_CANCEL_YES = "btn_cancel_yes"

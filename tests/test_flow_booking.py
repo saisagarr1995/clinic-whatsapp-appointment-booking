@@ -9,6 +9,8 @@ from clinic_bot.db.session import session_scope
 from clinic_bot.flow import ids
 from clinic_bot.whatsapp.base import ButtonMessage, ListMessage
 
+from .conftest import CLINIC_SLUG
+
 PATIENT_NAME = "Sagar Reddy"
 
 
@@ -141,22 +143,19 @@ def test_confirm_creates_a_pending_booking_and_sends_upi_details(bot, cfg):
         assert booking.hold_expires_at is not None
         ref = booking.ref
 
-    # A QR image, the UPI details, and the two action buttons.
-    images = out.images()
-    assert len(images) == 1
-    assert images[0].image_url.endswith(f"/qr/{ref}.png")
-
     body = out.all_text()
     assert cfg.payment.upi_id in body
     assert cfg.payment.upi_name in body
     assert ref in body
-    assert f"/pay/{ref}" in body
+    # The payment link must carry this clinic's own prefix, so a patient of one
+    # clinic can never be sent to another clinic's page.
+    assert f"/c/{CLINIC_SLUG}/pay/{ref}" in body
 
     assert out.has_button(ids.BTN_PAID)
     assert out.has_button(ids.BTN_HELP)
 
 
-def test_ive_paid_moves_to_awaiting_verification_and_greets(bot):
+def test_ive_paid_moves_to_awaiting_verification_and_asks_for_the_utr(bot):
     book_fully(bot)
     out = bot.tap(ids.BTN_PAID)
 
@@ -165,10 +164,69 @@ def test_ive_paid_moves_to_awaiting_verification_and_greets(bot):
         assert booking.status is BookingStatus.AWAITING_VERIFICATION
         assert booking.paid_declared_at is not None
         assert booking.hold_expires_at is None
+        assert booking.status is not BookingStatus.CONFIRMED, (
+            "tapping a button must never confirm a booking — only staff can"
+        )
+
+    # The patient is asked for the UPI reference before being thanked.
+    assert out.contains("UPI reference")
+    assert out.has_button(ids.BTN_SKIP_UTR)
+
+
+def test_giving_the_utr_stores_it_and_thanks_the_patient(bot):
+    book_fully(bot)
+    bot.tap(ids.BTN_PAID)
+    out = bot.say("123456789012")
+
+    with session_scope() as db:
+        booking = db.scalar(select(Booking))
+        assert booking.payment_ref == "123456789012"
+        assert booking.status is BookingStatus.AWAITING_VERIFICATION
 
     body = out.all_text()
-    assert "Thank you" in body
     assert PATIENT_NAME in body
+    assert "123456789012" in body
+    assert "verif" in body.lower(), "the patient must be told it is not yet confirmed"
+
+
+def test_skipping_the_utr_still_completes(bot):
+    book_fully(bot)
+    bot.tap(ids.BTN_PAID)
+    out = bot.tap(ids.BTN_SKIP_UTR)
+
+    with session_scope() as db:
+        booking = db.scalar(select(Booking))
+        assert booking.payment_ref == ""
+        assert booking.status is BookingStatus.AWAITING_VERIFICATION
+
+    assert PATIENT_NAME in out.all_text()
+
+
+def test_a_nonsense_utr_is_refused_without_dead_ending(bot):
+    book_fully(bot)
+    bot.tap(ids.BTN_PAID)
+    out = bot.say("i paid already")
+
+    assert out.contains("does not look like")
+    assert out.has_button(ids.BTN_SKIP_UTR)
+
+    with session_scope() as db:
+        assert db.scalar(select(Booking)).payment_ref == ""
+
+    # ...and a correct value still works afterwards.
+    bot.say("552211330099")
+    with session_scope() as db:
+        assert db.scalar(select(Booking)).payment_ref == "552211330099"
+
+
+def test_the_bot_never_claims_the_payment_is_confirmed(bot):
+    """The bot cannot see money move, so it must not say the booking is paid."""
+    book_fully(bot)
+    bot.tap(ids.BTN_PAID)
+    body = bot.tap(ids.BTN_SKIP_UTR).all_text().lower()
+
+    for lie in ("payment received", "payment confirmed", "appointment is confirmed"):
+        assert lie not in body, f"the bot must not claim {lie!r}"
 
 
 def test_need_help_shows_the_clinic_number(bot, cfg):
@@ -179,7 +237,8 @@ def test_need_help_shows_the_clinic_number(bot, cfg):
     # The patient must still be able to declare payment afterwards.
     assert out.has_button(ids.BTN_PAID)
 
-    out = bot.tap(ids.BTN_PAID)
+    bot.tap(ids.BTN_PAID)
+    out = bot.tap(ids.BTN_SKIP_UTR)
     assert "Thank you" in out.all_text()
 
 

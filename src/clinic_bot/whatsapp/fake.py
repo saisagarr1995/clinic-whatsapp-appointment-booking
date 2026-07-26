@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from clinic_bot.whatsapp.base import (
     ButtonMessage,
-    ImageMessage,
     ListMessage,
     OutboundMessage,
     Reply,
@@ -40,13 +39,11 @@ class FakeAdapter:
         return self.sent[-1] if self.sent else None
 
     def texts(self) -> list[str]:
-        out: list[str] = []
-        for m in self.sent:
-            if isinstance(m, TextMessage | ButtonMessage | ListMessage):
-                out.append(m.body)
-            elif isinstance(m, ImageMessage):
-                out.append(m.caption)
-        return out
+        return [
+            m.body
+            for m in self.sent
+            if isinstance(m, TextMessage | ButtonMessage | ListMessage)
+        ]
 
     def all_text(self) -> str:
         return "\n".join(self.texts())
@@ -71,9 +68,6 @@ class FakeAdapter:
             for s in m.sections
             for r in s.rows
         ]
-
-    def images(self) -> list[ImageMessage]:
-        return [m for m in self.sent if isinstance(m, ImageMessage)]
 
     def has_button(self, button_id: str) -> bool:
         return button_id in self.button_ids()
