@@ -34,6 +34,16 @@ class Settings(BaseSettings):
     # --- Local ---
     database_url: str = "sqlite:///data/clinic.db"
     clinic_config_path: str = "config/clinic.yaml"
+    #: The fleet definition. Each clinic listed here gets its own config,
+    #: its own database file and its own Meta credentials.
+    clinics_registry_path: str = "config/clinics.yaml"
+    #: Directory holding per-clinic Meta credentials as <slug>.env. Gitignored.
+    secrets_dir: str = "config/secrets"
+    #: Mounts the offline simulator at /c/{slug}/sim. MUST stay false in
+    #: production: the simulator injects messages into the state machine without
+    #: a webhook signature, which is exactly what signature verification exists
+    #: to prevent. Off by default, and the routes are not registered when off.
+    simulator: bool = False
     # Localhost by default. In production Caddy terminates TLS and proxies inward,
     # so the app must never listen on a public interface. Override only if you
     # genuinely intend to expose it unproxied.

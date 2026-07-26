@@ -1,0 +1,36 @@
+# =============================================================================
+# CLINIC FLEET REGISTRY
+# =============================================================================
+# THIS IS THE FILE YOU EDIT TO ADD A CLINIC. Nothing else. No code changes.
+#
+# Each clinic gets, automatically:
+#   * its own database          data/clinics/<slug>.db
+#   * its own webhook URL       <PUBLIC_BASE_URL>/c/<slug>/webhook
+#   * its own payment page      <PUBLIC_BASE_URL>/c/<slug>/pay/<ref>
+#   * its own Meta credentials  config/secrets/<slug>.env   (gitignored)
+#
+# The slug is permanent: it appears in the webhook URL registered with Meta and
+# in the payment links already sitting in patients' chats. Changing it later
+# breaks both. Use lowercase letters, digits and hyphens only.
+#
+# Add a clinic the easy way:
+#   .venv\Scripts\python.exe scripts/clinic_admin.py add <slug> --name "Clinic Name"
+#
+# Then seed it:
+#   .venv\Scripts\python.exe scripts/clinic_admin.py seed <slug>
+# -----------------------------------------------------------------------------
+
+clinics:
+  - slug: smile
+    name: "Smile Dental Clinic"
+    config: config/clinic.yaml
+    enabled: true
+
+  # Add more clinics by copying the block above. For example:
+  #
+  # - slug: ortho-care
+  #   name: "OrthoCare Dental"
+  #   config: config/clinics/ortho-care.yaml
+  #   enabled: true
+  #
+  # Set `enabled: false` to take one clinic offline without touching the others.

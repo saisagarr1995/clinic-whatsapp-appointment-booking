@@ -213,3 +213,83 @@ pip-audit   No known vulnerabilities found
 **Not yet verified:** anything requiring real WhatsApp — message delivery, button
 rendering on a handset, QR scanning, UPI apps opening. That is what
 `docs/TWO_PHONE_TEST.md` exists for, and it has not been run yet.
+
+---
+
+# Session 2 — 2026-07-26 — CAB-0014: laptop hosting and the clinic fleet
+
+## What changed and why
+
+The user changed the hosting decision: the product now runs on their Windows
+laptop, not (yet) on an Oracle VM, and must serve **many clinics, each with its own
+database, driven by one registry file**. They also asked for the QR to go and for
+memory use to stay low. Four locked decisions were amended — all recorded in
+`PROJECT_PLAN.md` at the decision they change.
+
+## The fleet registry
+
+`config/clinics.yaml` is now the only file edited to onboard a clinic. Each entry
+yields, automatically, its own config, database (`data/clinics/<slug>.db`), Meta
+credentials (`config/secrets/<slug>.env`, gitignored) and URL scope (`/c/<slug>/`).
+
+The refactor was to three global singletons that hard-wired one clinic:
+`get_clinic_config()` and `get_settings()` were `@lru_cache`'d, and `db/session.py`
+held a module-global `_engine`. Engines are now cached per database URL, and
+`registry.Clinic` carries config, session factory, credentials and base URL.
+
+## One process, not one per clinic (D13 amended)
+
+D13 originally called for a process per clinic, giving OS-level isolation. On a
+laptop that costs ~85 MB each. The fleet now runs in one process that resolves the
+clinic from the URL.
+
+**Measured, not estimated:** 85.2 MB for one clinic; 86.8 MB for five — about
+0.4 MB per additional clinic, against ~425 MB for five processes. After dropping
+Pillow the single-clinic figure fell to 82.1 MB.
+
+What was given up is OS-level isolation, so the isolation is now proven by test
+instead of assumed. `tests/test_multi_clinic.py` asserts that a booking in one
+clinic is invisible to another, that a payment reference does not resolve at
+another clinic, and — the important one — that **a webhook signature valid for one
+clinic is rejected by every other**, because the Meta app secret is per clinic.
+If those tests are ever weakened, D13 must be revisited.
+
+## QR removed (D4 amended)
+
+`qrcode[pil]` pulled in Pillow, the heaviest dependency in the tree, to render one
+small PNG. The patient pays from the handset holding the chat, where the payment
+page's app-chooser buttons and the copyable VPA already complete the journey. The
+QR only helped someone scanning from a second device — that is the accepted cost.
+Removed `payments/qr.py`, the `/qr/{ref}.png` route, the `ImageMessage` from the
+payment reply, and the QR block from `pay.html`.
+
+## Offline simulator
+
+`/c/<slug>/sim` drives the real state machine against the real database through the
+existing `FakeAdapter`, so the whole flow is validated with no Meta account, no
+credentials and no tunnel. Buttons and list rows post back the true wire ids.
+
+It bypasses signature verification by design, so it is gated on `SIMULATOR=true`,
+defaulting to **false**, and the router is not registered at all when off.
+`tests/test_simulator.py` asserts the endpoints 404 by default.
+
+## Verification
+
+```
+pytest      180 passed   (was 152; +28 for fleet isolation and the simulator)
+ruff        All checks passed
+bandit      0 high, 0 medium
+pip-audit   No known vulnerabilities found
+memory      82.1 MB one clinic · 86.8 MB five clinics (measured RSS)
+```
+
+Validated live over HTTP, not only in tests: a full booking was driven through the
+simulator end to end (`SDC-ALE7Y`), and the payment page rendered with a working
+`upi://` link and no image tag.
+
+## Known inconsistency left behind
+
+`deploy/fleet.sh` and `deploy/clinic-bot@.service` still describe the old
+process-per-clinic model and were **not** reworked. `deploy/Caddyfile` was updated
+to pass `/c/<slug>/` through unchanged. The VM path must be reconciled before
+`DEPLOYMENT.md` is followed again — noted in `SESSION_STATE.md`.

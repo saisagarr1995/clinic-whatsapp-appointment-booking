@@ -25,7 +25,7 @@ from clinic_bot.db.models import Booking, BookingStatus, Doctor, Service
 from clinic_bot.flow import ids, session_store, views
 from clinic_bot.flow.session_store import FlowSession
 from clinic_bot.flow.states import Mode, State
-from clinic_bot.payments import qr
+from clinic_bot.payments.upi import pay_url
 from clinic_bot.scheduling import clock, slots
 from clinic_bot.settings import Settings
 from clinic_bot.whatsapp import messages as M
@@ -38,9 +38,13 @@ NAME_MAX = 60
 
 
 class Router:
-    def __init__(self, cfg: ClinicConfig, settings: Settings):
+    def __init__(self, cfg: ClinicConfig, settings: Settings, base_url: str | None = None):
         self.cfg = cfg
         self.settings = settings
+        #: Public URL this clinic is reached on. In the multi-clinic fleet each
+        #: clinic carries its own /c/<slug> prefix, so the payment link a patient
+        #: receives always points back at *their* clinic.
+        self.base_url = (base_url or settings.public_base_url).rstrip("/")
 
     # ------------------------------------------------------------------
     # Entry point
@@ -451,14 +455,11 @@ class Router:
         if not ref:
             return self._go_welcome(db, flow, to, note_expiry=False)
 
-        qr.ensure_qr(self.cfg, ref=ref)
-        base = self.settings.public_base_url
         return views.payment(
             to,
             cfg=self.cfg,
             ref=ref,
-            qr_image_url=qr.qr_url(base, ref),
-            pay_page_url=qr.pay_url(base, ref),
+            pay_page_url=pay_url(self.base_url, ref),
         )
 
     def _st_payment(

@@ -89,10 +89,11 @@ def seed_doctors(session: Session, cfg: ClinicConfig, services: dict[str, Servic
     session.flush()
 
 
-def seed(cfg: ClinicConfig | None = None) -> None:
+def seed(cfg: ClinicConfig | None = None, url: str | None = None) -> None:
+    """Seed one clinic. `url` selects which database — omit it for the default."""
     cfg = cfg or get_clinic_config()
-    init_db()
-    with session_scope() as session:
+    init_db(url)
+    with session_scope(url) as session:
         services = seed_services(session, cfg)
         seed_doctors(session, cfg, services)
     log.info(

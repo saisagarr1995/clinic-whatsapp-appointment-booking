@@ -226,15 +226,14 @@ def payment_instructions(cfg: ClinicConfig, ref: str, pay_url: str) -> str:
             "",
             f"👉 *Tap to pay:* {pay_url}",
             "",
-            "You can also scan the QR code above with any UPI app "
-            "(GPay, PhonePe, Paytm, CRED, BHIM).",
+            "That link opens GPay, PhonePe, Paytm, CRED or BHIM with the amount "
+            "already filled in. You can also pay the UPI ID above directly.",
             "",
             f"⏳ This slot is held for {cfg.booking.hold_minutes} minutes.",
         ]
     )
 
 
-QR_CAPTION = "Scan to pay with any UPI app"
 PAYMENT_CTA = "Once you have paid, tap *I've Paid* below."
 
 

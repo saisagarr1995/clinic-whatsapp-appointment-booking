@@ -9,6 +9,8 @@ from clinic_bot.db.session import session_scope
 from clinic_bot.flow import ids
 from clinic_bot.whatsapp.base import ButtonMessage, ListMessage
 
+from .conftest import CLINIC_SLUG
+
 PATIENT_NAME = "Sagar Reddy"
 
 
@@ -141,16 +143,16 @@ def test_confirm_creates_a_pending_booking_and_sends_upi_details(bot, cfg):
         assert booking.hold_expires_at is not None
         ref = booking.ref
 
-    # A QR image, the UPI details, and the two action buttons.
-    images = out.images()
-    assert len(images) == 1
-    assert images[0].image_url.endswith(f"/qr/{ref}.png")
+    # No image is sent — the UPI QR was dropped (PROJECT_PLAN D4, 2026-07-26).
+    assert out.images() == []
 
     body = out.all_text()
     assert cfg.payment.upi_id in body
     assert cfg.payment.upi_name in body
     assert ref in body
-    assert f"/pay/{ref}" in body
+    # The payment link must carry this clinic's own prefix, so a patient of one
+    # clinic can never be sent to another clinic's page.
+    assert f"/c/{CLINIC_SLUG}/pay/{ref}" in body
 
     assert out.has_button(ids.BTN_PAID)
     assert out.has_button(ids.BTN_HELP)

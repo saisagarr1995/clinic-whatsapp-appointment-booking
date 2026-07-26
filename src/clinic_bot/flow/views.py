@@ -17,7 +17,6 @@ from clinic_bot.whatsapp.base import (
     BODY_MAX,
     Button,
     ButtonMessage,
-    ImageMessage,
     ListMessage,
     Reply,
     Row,
@@ -310,17 +309,15 @@ def summary(
     )
 
 
-def payment(
-    to: str, *, cfg: ClinicConfig, ref: str, qr_image_url: str, pay_page_url: str
-) -> Reply:
-    """QR image, then instructions, then the action buttons.
+def payment(to: str, *, cfg: ClinicConfig, ref: str, pay_page_url: str) -> Reply:
+    """Payment instructions, then the action buttons.
 
-    Order matters: the image lands first so the instruction text reads as a
-    caption for the QR the patient can already see.
+    No QR image: the patient pays from the phone holding this chat, so the
+    payment page's app chooser and the copyable UPI ID cover the journey.
+    See PROJECT_PLAN.md D4 (amended 2026-07-26).
     """
     return Reply(
         [
-            ImageMessage(to=to, image_url=qr_image_url, caption=M.QR_CAPTION),
             TextMessage(
                 to=to,
                 body=M.payment_instructions(cfg, ref, pay_page_url),

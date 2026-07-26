@@ -189,22 +189,43 @@ def parse_webhook(body: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 class CloudApiAdapter:
-    """Sends messages through the Meta Graph API."""
+    """Sends messages through the Meta Graph API.
 
-    def __init__(self, settings: Settings | None = None, client: httpx.Client | None = None):
+    Credentials are per clinic: each clinic in the fleet has its own phone number
+    id and access token, so the adapter is constructed once per clinic rather
+    than once per process.
+    """
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        client: httpx.Client | None = None,
+        credentials=None,  # noqa: ANN001 - registry.ClinicCredentials, avoids a circular import
+    ):
         self._settings = settings or get_settings()
+        self._creds = credentials
         self._client = client or httpx.Client(timeout=20.0)
+
+    @property
+    def _access_token(self) -> str:
+        if self._creds is not None:
+            return self._creds.access_token
+        return self._settings.whatsapp_access_token
+
+    @property
+    def _messages_url(self) -> str:
+        if self._creds is not None:
+            return self._creds.messages_url
+        return self._settings.messages_url
 
     def send(self, message: OutboundMessage) -> str | None:
         payload = build_payload(message)
         headers = {
-            "Authorization": f"Bearer {self._settings.whatsapp_access_token}",
+            "Authorization": f"Bearer {self._access_token}",
             "Content-Type": "application/json",
         }
         try:
-            response = self._client.post(
-                self._settings.messages_url, json=payload, headers=headers
-            )
+            response = self._client.post(self._messages_url, json=payload, headers=headers)
         except httpx.HTTPError as exc:
             raise WhatsAppSendError(f"Network error contacting Meta: {exc}") from exc
 

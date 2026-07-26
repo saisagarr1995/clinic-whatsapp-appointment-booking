@@ -1,0 +1,35 @@
+# Free on public repositories. Alerts were already on; this adds the automated
+# version-bump pull requests, which is the part that actually keeps the tree
+# patched rather than just telling you it is not.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # PRs must land on the release branch, never on main directly —
+    # the merge path is feature -> release/1.0 -> main.
+    target-branch: "release/1.0"
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "deps"
+    groups:
+      # One PR for routine patch bumps keeps the review load sane; anything
+      # major still arrives on its own so it gets read properly.
+      patch-updates:
+        update-types:
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    target-branch: "release/1.0"
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "ci"

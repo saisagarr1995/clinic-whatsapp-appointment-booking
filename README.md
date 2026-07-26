@@ -55,10 +55,9 @@ Bot:     📋 Booking Summary
          💳 Advance to confirm: ₹200
          [Confirm] [Change Details]
 
-Bot:     (QR code image)
-         ✅ Appointment reserved! Reference: SDC-K3M7Q
+Bot:     ✅ Appointment reserved! Reference: SDC-K3M7Q
          UPI ID: smiledental@okhdfcbank
-         👉 Tap to pay: https://.../pay/SDC-K3M7Q
+         👉 Tap to pay: https://.../c/smile/pay/SDC-K3M7Q
          [I've Paid] [Need Help]
 ```
 
@@ -180,7 +179,7 @@ message, rather than breaking a patient's booking later.
 
 ## Tech stack
 
-Python 3.12 · FastAPI · SQLAlchemy · SQLite · Jinja2 · qrcode · httpx
+Python 3.12 · FastAPI · SQLAlchemy · SQLite · Jinja2 · httpx
 Meta WhatsApp Cloud API · Caddy · systemd
 
 No AI libraries. No paid services. Nothing that phones home.

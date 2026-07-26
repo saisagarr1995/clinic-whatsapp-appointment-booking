@@ -9,19 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| Last updated | 2026-07-20 |
-| Current phase | Core product complete; deployment not yet performed |
-| Current branch | `release/1.0` |
+| Last updated | 2026-07-26 |
+| Current phase | Multi-clinic fleet running locally; validated offline, never against real WhatsApp |
+| Current branch | `feature/CAB-0014` |
 | Repository | https://github.com/saisagarr1995/clinic-whatsapp-appointment-booking |
-| Overall status | 🟢 Code complete and verified locally · 🟡 Never run against real WhatsApp |
-| Blockers | Meta credentials and the Oracle VM do not exist yet — both need the user |
+| Overall status | 🟢 Fleet runs on the laptop and the full flow is proven in the simulator · 🟡 Never run against real WhatsApp |
+| Blockers | Meta credentials do not exist yet — needs the user |
 
 ### Verification at last commit
 ```
-pytest      152 passed
+pytest      180 passed
 ruff        All checks passed
 bandit      0 high, 0 medium
 pip-audit   No known vulnerabilities found
+memory      82.1 MB one clinic · 86.8 MB five clinics (measured RSS)
 ```
 
 ---
@@ -47,21 +48,35 @@ pip-audit   No known vulnerabilities found
 
 ## In flight
 
-- [ ] Nothing mid-edit. The tree is clean.
+- [ ] Nothing mid-edit. CAB-0014 is complete and committed; the tree is clean.
 
 ## Next action (start here)
 
-**The next step belongs to the user, not to Claude.** The product cannot progress further
-without real infrastructure. In order:
+The bot **runs on the user's laptop right now** and the whole conversation has been
+validated in the offline simulator. Hosting no longer blocks progress; only Meta does.
 
-1. Create the Oracle Cloud Always Free VM — `docs/DEPLOYMENT.md` Part 1.
-2. Set up a DuckDNS subdomain — Part 2.
-3. Run `deploy/install_server.sh` — Part 3.
-4. Create the Meta app and get credentials — Part 4.
-5. Work through `docs/TWO_PHONE_TEST.md` on both handsets.
+To go live, in order — all documented in `docs/LOCAL_HOSTING.md`:
 
-When the user reports results from step 5, fix whatever it surfaces. **Until then, nothing
-in this project has been proven against real WhatsApp** — only against the test suite.
+1. Install Tailscale, enable MagicDNS + HTTPS, run `tailscale funnel 8000`.
+2. Put the `https://….ts.net` address in `.env` as `PUBLIC_BASE_URL`.
+3. **Set `SIMULATOR=false`** before the address is public. The simulator accepts
+   unsigned messages by design.
+4. Create a Meta app per clinic, fill `config/secrets/<slug>.env`.
+5. `python scripts/clinic_admin.py webhook <slug>` prints exactly what to paste.
+6. Work through `docs/TWO_PHONE_TEST.md`.
+
+**Nothing in this project has yet been proven against real WhatsApp** — only against
+the test suite and the simulator. Message delivery, button rendering on a handset and
+UPI apps opening are all still unverified.
+
+## ⚠️ Inconsistency a future session must resolve
+
+`deploy/fleet.sh` and `deploy/clinic-bot@.service` still assume the **old**
+process-per-clinic model that D13 replaced on 2026-07-26. `deploy/Caddyfile` was
+updated for the new single-process model, but those two were not. **Do not follow
+`docs/DEPLOYMENT.md` for the Oracle VM until they are reconciled** — the systemd
+template would start one process per clinic against databases the single-process app
+also expects to own.
 
 ### Remaining planned work (not blocking the above)
 
@@ -92,22 +107,27 @@ wizard reflects what the process actually turned out to be.
 | CAB-0009 | Test suite + bug-fix pass | ✅ done |
 | CAB-0010 | CI + branch protection | ✅ done |
 | CAB-0011 | Onboarding wizard | ⬜ not started |
-| CAB-0012 | Fleet deployment infrastructure | ✅ done (auto-deploy pipeline outstanding) |
+| CAB-0012 | Fleet deployment infrastructure | ✅ done (auto-deploy outstanding; superseded in part by CAB-0014) |
+| CAB-0013 | Session handoff after initial build | ✅ done |
+| CAB-0014 | Laptop hosting, clinic registry, simulator, QR removal | ✅ done |
 
 ---
 
 ## Open items needing the user
 
-1. **Oracle Cloud account** — card needed for identity verification only, never charged.
-   User confirmed they can do this.
-2. **DuckDNS subdomain** — free, no card.
-3. **Meta app per clinic** — phone number ID, business account ID, permanent access token,
-   app secret. `docs/DEPLOYMENT.md` Part 4 has the click path.
-4. **Phone B whitelisted** as a Meta test recipient (max 5).
-5. **Real clinic data** for `clinic.yaml` — services, fees, doctors, hours, UPI ID.
-   Placeholder data ships today.
+1. **Tailscale account + Funnel** — free, no card, no domain. Gives the stable public
+   HTTPS address the Meta webhook needs. `docs/LOCAL_HOSTING.md` §3.
+2. **Meta app per clinic** — phone number ID, permanent access token, app secret,
+   verify token, into `config/secrets/<slug>.env`. `LOCAL_HOSTING.md` §4.
+3. **Phone B whitelisted** as a Meta test recipient (max 5).
+4. **Real clinic data** for `config/clinic.yaml` — services, fees, doctors, hours,
+   UPI ID. Placeholder data ships today.
+5. **Power settings** — the laptop must not sleep or the whole fleet goes offline.
+   Commands are printed by `scripts/install_autostart.ps1`; the user must run them.
 6. **Phone A migration** off the WhatsApp mobile app — go-live only. ⚠️ This **erases the
    clinic's existing WhatsApp chat history**. Warn them; consider a fresh SIM instead.
+7. **Oracle Cloud VM** — no longer blocking, but still the right host for clinics with
+   real patients. Deferred by the user in favour of laptop hosting.
 
 ---
 
@@ -116,13 +136,17 @@ wizard reflects what the process actually turned out to be.
 - WhatsApp transport: **Meta official Cloud API**. Reverse-engineered libraries were
   rejected — ToS violation, ban risk, unreliable button rendering.
 - No `pywa`, no `alembic` — both dropped with reasons in `PROJECT_PLAN.md` §4.
-- UPI: QR + copyable VPA + self-hosted payment page with app intents.
-- Onboarding: `config/clinic.yaml` + SQLite seed, zero code changes per clinic.
-- Hosting: **Oracle Cloud Always Free**. Sleeping/expiring free tiers rejected as unsellable.
+- UPI: copyable VPA + self-hosted payment page with app intents. **No QR** — removed
+  2026-07-26, which also removed Pillow. See `PROJECT_PLAN.md` D4.
+- Onboarding: `config/clinics.yaml` registry + per-clinic YAML + SQLite seed. Zero code
+  changes per clinic.
+- Hosting: **the user's laptop**, via Tailscale Funnel (chosen 2026-07-26). Oracle Cloud
+  Always Free remains the recommendation for real patient load, not a blocker.
 - Database: **SQLite only**, no Postgres — a persistent disk removes the reason for it.
-- Multi-clinic: **process + database per clinic**, not shared-database multi-tenancy,
-  because a missing `WHERE clinic_id` would leak patient data between clinics.
+- Multi-clinic: **one process, one database per clinic** (amended 2026-07-26 from
+  process-per-clinic, for laptop memory). No shared tables, no `WHERE clinic_id`.
 - Routing: path-based `/c/<slug>/` so one certificate covers the fleet.
+- Simulator: gated on `SIMULATOR`, default **false**. Never on in production.
 - Admin dashboard: deferred out of 1.0.
 
 ---
@@ -136,8 +160,17 @@ wizard reflects what the process actually turned out to be.
   break the ₹0 guarantee. This is why reminders are deferred.
 - **Button and row ids are a wire protocol.** A patient may tap a button from a message
   sent days ago. Never change an existing id value; only add.
-- **Backups live on the same VM as the data.** Once there are paying clinics, they must be
-  copied off-server. Documented in `DEPLOYMENT.md` but not yet implemented.
+- **Backups live on the same machine as the data.** Once there are paying clinics, they
+  must be copied off the laptop. `LOCAL_HOSTING.md` §5 gives the command; it is not
+  automated.
+- **`SIMULATOR=true` must never reach a public deployment.** `/c/<slug>/sim` injects
+  messages into the state machine with no webhook signature — exactly what
+  `verify_signature` exists to prevent. It defaults to false and the routes are not
+  registered when off; keep it that way.
+- **The clinic slug is a wire protocol too.** It is in the webhook URL registered with
+  Meta and in payment links already sitting in patients' chats. Never rename a slug.
+- **Cross-clinic isolation is proven by test, not by the OS**, since D13 was amended.
+  `tests/test_multi_clinic.py` is load-bearing — if it is ever weakened, revisit D13.
 
 ---
 
@@ -146,3 +179,4 @@ wizard reflects what the process actually turned out to be.
 | Date | Session summary |
 |------|-----------------|
 | 2026-07-20 | Requirements gathered; plan locked; full product built and tested (152 tests); 5 bugs found and fixed; infrastructure redesigned twice as the user clarified hosting constraints and the 50-clinic scale target; GitHub repo created and protected. Nothing yet verified against real WhatsApp. |
+| 2026-07-26 | **CAB-0014.** User moved hosting to their laptop and asked for a multi-clinic fleet driven by one registry file, plus lower memory and no QR. Built `config/clinics.yaml` + `registry.py`; refactored three global singletons to be per-clinic; path-scoped every route to `/c/<slug>/`; per-clinic Meta credentials and signature verification. Removed the UPI QR and with it Pillow. Added a gated offline simulator, the `clinic_admin` CLI, Windows run/autostart scripts, CodeQL and Dependabot. 152 → 180 tests. Measured 82 MB for one clinic, 87 MB for five. Full booking driven end to end through the simulator. Still unverified against real WhatsApp. |
