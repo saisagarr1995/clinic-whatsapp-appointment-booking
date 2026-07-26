@@ -103,11 +103,13 @@ def cmd_add(args: argparse.Namespace) -> int:
     registry.write_text(text.rstrip("\n") + "\n" + entry, encoding="utf-8")
     print(f"{OK} registered {slug!r} in {registry.name}")
 
-    secrets = ROOT / get_settings().secrets_dir / f"{slug}.env"
-    if not secrets.exists():
-        secrets.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(ROOT / "config" / "secrets" / "example.env.template", secrets)
-        print(f"{OK} created {secrets.relative_to(ROOT)} (fill in the Meta credentials)")
+    # Not named `secrets`: that shadows the stdlib module and makes every static
+    # analyser treat the path itself as a credential.
+    secrets_path = ROOT / get_settings().secrets_dir / f"{slug}.env"
+    if not secrets_path.exists():
+        secrets_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / "config" / "secrets" / "example.env.template", secrets_path)
+        print(f"{OK} created config/secrets/{slug}.env (fill in the Meta credentials)")
 
     print("\nNext:")
     print(f"  1. Edit {config_rel} — services, doctors, hours, UPI id")

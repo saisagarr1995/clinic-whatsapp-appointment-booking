@@ -102,7 +102,7 @@ def test_tapping_a_button_id_advances_the_flow(sim_client):
 
 def test_a_service_list_is_serialised_with_real_row_ids(sim_client):
     for payload in ({"text": "hi"}, {"reply_id": ids.BTN_BOOK}, {"reply_id": ids.BTN_BOOK_NEW}):
-        r = sim_client.post(f"{SIM}/send", json=payload)
+        sim_client.post(f"{SIM}/send", json=payload)
 
     sim_client.post(f"{SIM}/send", json={"text": "Test Patient"})
     r = sim_client.post(f"{SIM}/send", json={"reply_id": ids.BTN_VIEW_SERVICES})

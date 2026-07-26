@@ -122,19 +122,31 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
 
     @app.get("/health", include_in_schema=False)
     def health() -> JSONResponse:
+        """Fleet status.
+
+        This endpoint is PUBLIC — it is reachable through the tunnel by anyone who
+        guesses the URL. Exception text is therefore logged server-side and never
+        returned: a config or registry error would otherwise leak filesystem paths
+        and internal structure to an unauthenticated caller.
+        """
         try:
             clinics = get_registry()
-        except Exception as exc:  # registry itself is broken
-            return JSONResponse(status_code=503, content={"status": "down", "error": str(exc)})
+        except Exception:  # registry itself is broken
+            log.exception("Registry failed to load while serving /health")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "down", "error": "registry unavailable — see server log"},
+            )
 
         report = []
         healthy = True
         for slug, clinic in clinics.items():
             try:
                 _ = clinic.config  # property access performs the load
-                config_ok, error = True, None
-            except Exception as exc:
-                config_ok, error = False, str(exc)
+                config_ok = True
+            except Exception:
+                log.exception("Clinic %s has an invalid config", slug)
+                config_ok = False
 
             missing = clinic.credentials.missing()
             # In simulator mode absent Meta credentials are expected, not a fault.
@@ -148,8 +160,8 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
                 "missing_credentials": missing,
                 "can_send_whatsapp": not missing,
             }
-            if error:
-                entry["error"] = error
+            if not config_ok:
+                entry["error"] = "config invalid — see server log"
             report.append(entry)
 
         return JSONResponse(
@@ -219,6 +231,15 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
     return app
 
 
+def _safe(value: str, limit: int = 64) -> str:
+    """Make a webhook-supplied value safe to write into a log line.
+
+    Message ids and WhatsApp ids arrive from the network. Without stripping
+    newlines an attacker could inject fabricated log entries.
+    """
+    return "".join(ch for ch in str(value) if ch.isprintable())[:limit]
+
+
 def _claim(clinic: Clinic, message_id: str) -> bool:
     """Record a message id. Returns False if it was already processed."""
     if not message_id:
@@ -227,7 +248,10 @@ def _claim(clinic: Clinic, message_id: str) -> bool:
         with clinic.session() as db:
             db.add(ProcessedMessage(message_id=message_id))
     except IntegrityError:
-        log.info("Duplicate webhook delivery for %s (%s) — ignoring", message_id, clinic.slug)
+        log.info(
+            "Duplicate webhook delivery for %s (%s) — ignoring",
+            _safe(message_id), clinic.slug,
+        )
         return False
     return True
 
@@ -250,7 +274,7 @@ def _process(app: FastAPI, clinic: Clinic, inbound: InboundMessage) -> None:
     except Exception:
         log.exception(
             "Failed handling message %s from %s (clinic %s)",
-            inbound.message_id, inbound.wa_id, clinic.slug,
+            _safe(inbound.message_id), _safe(inbound.wa_id), clinic.slug,
         )
         # Never leave the patient staring at silence.
         try:

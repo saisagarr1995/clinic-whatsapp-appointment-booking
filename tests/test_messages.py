@@ -301,9 +301,9 @@ def test_no_double_spaces_or_stray_whitespace(bot):
 
 def test_the_patient_name_is_emphasised_not_mangled(bot):
     """`Thank you, *Name*!` must wrap the name exactly once, cleanly."""
-    out = bot.say("Hi")
     from clinic_bot.flow import ids
 
+    bot.say("Hi")
     bot.tap(ids.BTN_BOOK)
     bot.tap(ids.BTN_BOOK_NEW)
     out = bot.say("Ravi Teja")

@@ -228,8 +228,10 @@ def payment_instructions(cfg: ClinicConfig, ref: str, pay_url: str) -> str:
             "",
             f"👉 *Tap to pay:* {pay_url}",
             "",
-            "That link opens GPay, PhonePe, Paytm, CRED or BHIM with the amount "
-            "already filled in. You can also pay the UPI ID above directly.",
+            (
+                "That link opens GPay, PhonePe, Paytm, CRED or BHIM with the amount "
+                "already filled in. You can also pay the UPI ID above directly."
+            ),
             "",
             f"⏳ This slot is held for {cfg.booking.hold_minutes} minutes.",
         ]
@@ -277,8 +279,10 @@ def paid_thanks(cfg: ClinicConfig, *, patient_name: str, ref: str, starts_at: dt
     lines += [
         f"📍 {cfg.clinic.address}",
         "",
-        "_Our team will check your payment and confirm this appointment. "
-        "Please arrive 10 minutes early._",
+        (
+            "_Our team will check your payment and confirm this appointment. "
+            "Please arrive 10 minutes early._"
+        ),
         "",
         f"Any question? Call us on {cfg.clinic.phone}",
     ]
