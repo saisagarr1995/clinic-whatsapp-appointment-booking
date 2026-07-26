@@ -132,18 +132,18 @@ def contact(cfg: ClinicConfig) -> str:
     return "\n".join(parts)
 
 
-BOOKING_MENU = "What would you like to do?"
+BOOKING_MENU = "📅 What would you like to do?"
 
 # --- Book new ---
 BOOK_INTRO = "Great! Let's get you booked in. 😊"
-ASK_NAME = "May I have your full name please?"
+ASK_NAME = "👤 May I have your full name please?"
 
 
 def thank_you_name(name: str) -> str:
-    return f"Thank you, *{name}*!"
+    return f"Thank you, *{name}*! 🙏"
 
 
-ASK_SERVICE = "Which service do you need today?"
+ASK_SERVICE = "🦷 Which service do you need today?"
 VIEW_SERVICES_BTN = "View Services"
 SERVICES_LIST_HEADER = "Our Services"
 SERVICES_LIST_BODY = "Tap below to see all treatments and pick the one you need."
@@ -151,7 +151,7 @@ SERVICES_SECTION = "Treatments"
 
 
 def ask_doctor(service_name: str) -> str:
-    return f"You selected *{service_name}*.\n\nPlease choose your preferred doctor:"
+    return f"✅ You selected *{service_name}*.\n\n👨‍⚕️ Please choose your preferred doctor:"
 
 
 DOCTORS_LIST_BTN = "View Doctors"
@@ -160,7 +160,7 @@ DOCTORS_SECTION = "Doctors"
 
 
 def ask_date(doctor_name: str) -> str:
-    return f"You selected *{doctor_name}*.\n\nPlease choose a date:"
+    return f"✅ You selected *{doctor_name}*.\n\n📅 Please choose a date:"
 
 
 DATES_LIST_BTN = "View Dates"
@@ -169,7 +169,7 @@ DATES_SECTION = "Next available"
 
 
 def ask_slot(doctor_name: str, date_label: str) -> str:
-    return f"*{doctor_name}* on *{date_label}*.\n\nPlease choose a time slot:"
+    return f"✅ *{doctor_name}* on *{date_label}*.\n\n🕐 Please choose a time that suits you:"
 
 
 SLOTS_LIST_BTN = "View Timings"
@@ -220,9 +220,11 @@ def payment_instructions(cfg: ClinicConfig, ref: str, pay_url: str) -> str:
             f"To confirm, please pay the advance of *{rupees(p.advance_amount)}*.",
             "",
             "💳 *UPI Details*",
-            f"UPI ID: `{p.upi_id}`",
-            f"Name: {p.upi_name}",
-            f"Amount: {rupees(p.advance_amount)}",
+            # No backticks: WhatsApp only renders monospace for TRIPLE backticks,
+            # so a single pair would show up literally in the patient's chat.
+            f"🏦 UPI ID: *{p.upi_id}*",
+            f"👤 Name: {p.upi_name}",
+            f"💵 Amount: {rupees(p.advance_amount)}",
             "",
             f"👉 *Tap to pay:* {pay_url}",
             "",

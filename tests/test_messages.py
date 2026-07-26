@@ -241,3 +241,73 @@ def test_unknown_message_type_is_refused():
 
     with pytest.raises(TypeError):
         build_payload(Weird())  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------
+# WhatsApp text formatting in patient-visible copy
+# --------------------------------------------------------------------------
+#
+# WhatsApp renders *bold*, _italic_, ~strike~ and ```monospace```. Anything else
+# is shown to the patient literally. Getting this wrong is invisible in code
+# review and glaring in the chat, so it is pinned here.
+
+
+def _all_copy(bot) -> list[str]:
+    """Every patient-visible string from a complete booking conversation."""
+    from clinic_bot.flow import ids
+
+    from .test_flow_booking import book_fully
+
+    seen: list[str] = []
+    out = bot.say("Hi")
+    seen += out.texts()
+    for step in (ids.BTN_SERVICES, ids.BTN_CONTACT):
+        seen += bot.tap(step).texts()
+
+    book_fully(bot)
+    seen += bot.adapter.texts()
+    seen += bot.tap(ids.BTN_PAID).texts()
+    seen += bot.say("438291750163").texts()
+    return [s for s in seen if s]
+
+
+def test_no_single_backtick_monospace_in_any_message(bot):
+    """WhatsApp only honours TRIPLE backticks.
+
+    Regression: the UPI id was wrapped in single backticks, so patients saw
+    `upi@bank` with the backticks printed in their chat.
+    """
+    for text in _all_copy(bot):
+        stripped = text.replace("```", "")
+        assert "`" not in stripped, f"single backtick renders literally: {text!r}"
+
+
+def test_formatting_markers_are_balanced(bot):
+    """An unclosed * or _ shows the raw character to the patient."""
+    for text in _all_copy(bot):
+        for marker in ("*", "_", "~"):
+            count = text.count(marker)
+            assert count % 2 == 0, (
+                f"unbalanced {marker!r} ({count}) would render literally in:\n{text!r}"
+            )
+
+
+def test_no_double_spaces_or_stray_whitespace(bot):
+    for text in _all_copy(bot):
+        assert "  " not in text.replace("\n", ""), f"double space in: {text!r}"
+        for line in text.split("\n"):
+            assert line == line.rstrip(), f"trailing whitespace in: {text!r}"
+
+
+def test_the_patient_name_is_emphasised_not_mangled(bot):
+    """`Thank you, *Name*!` must wrap the name exactly once, cleanly."""
+    out = bot.say("Hi")
+    from clinic_bot.flow import ids
+
+    bot.tap(ids.BTN_BOOK)
+    bot.tap(ids.BTN_BOOK_NEW)
+    out = bot.say("Ravi Teja")
+
+    text = out.all_text()
+    assert "*Ravi Teja*" in text
+    assert "**" not in text, "doubled markers render literally"

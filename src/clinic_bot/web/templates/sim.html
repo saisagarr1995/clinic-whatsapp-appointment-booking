@@ -44,6 +44,12 @@
   .msg.me { background: var(--out); margin-left: auto; }
   .hdr { font-weight: 600; margin-bottom: 4px; }
   .ftr { color: var(--muted); font-size: 12px; margin-top: 5px; }
+  .msg b { font-weight: 600; }
+  .msg code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13.5px; background: rgba(255,255,255,.07);
+    padding: 1px 5px; border-radius: 4px;
+  }
 
   .btns { display: flex; flex-direction: column; gap: 6px; margin-top: 9px; }
   .btn {
@@ -130,6 +136,30 @@
     return n;
   }
 
+  // WhatsApp renders *bold*, _italic_, ~strike~ and ```mono```. Showing the raw
+  // markers here would misrepresent what a patient actually sees on a handset.
+  // HTML is escaped FIRST — message bodies contain patient-typed names.
+  function waFormat(text) {
+    var out = String(text === undefined || text === null ? '' : text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Triple-backtick monospace before anything else can touch its contents.
+    out = out.replace(/```([\s\S]+?)```/g, '<code>$1</code>');
+    // A marker only formats when it wraps non-space text, as on WhatsApp.
+    out = out.replace(/(^|[\s(])\*(\S(?:[^*\n]*\S)?)\*(?=[\s.,!?)]|$)/g, '$1<b>$2</b>');
+    out = out.replace(/(^|[\s(])_(\S(?:[^_\n]*\S)?)_(?=[\s.,!?)]|$)/g, '$1<i>$2</i>');
+    out = out.replace(/(^|[\s(])~(\S(?:[^~\n]*\S)?)~(?=[\s.,!?)]|$)/g, '$1<s>$2</s>');
+    return out;
+  }
+
+  function body(text) {
+    var n = document.createElement('div');
+    n.innerHTML = waFormat(text);
+    return n;
+  }
+
   function disableOld() {
     // A patient can tap an old button in WhatsApp, but showing every past
     // keyboard as live makes the simulator confusing. Grey out superseded ones.
@@ -152,7 +182,7 @@
     var box = el('div', 'msg');
 
     if (m.header) box.appendChild(el('div', 'hdr', m.header));
-    box.appendChild(el('div', '', m.body || ''));
+    box.appendChild(body(m.body));
     if (m.footer) box.appendChild(el('div', 'ftr', m.footer));
 
     if (m.kind === 'buttons') {
