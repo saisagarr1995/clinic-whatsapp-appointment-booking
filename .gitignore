@@ -35,6 +35,13 @@ dist/
 htmlcov/
 coverage.xml
 
+# --- Stray screenshots and pasted images dropped in the repo root ---
+# Only the root is ignored; templates and docs may still carry real assets.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+
 # --- Editors / OS ---
 .vscode/
 .idea/
