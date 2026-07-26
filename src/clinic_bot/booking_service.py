@@ -3,9 +3,16 @@
 DRAFT is never persisted — a booking row is created only at Confirm, in
 PENDING_PAYMENT, which is the moment the slot becomes reserved.
 
-    PENDING_PAYMENT --(I've Paid)--> AWAITING_VERIFICATION --(staff)--> CONFIRMED
+    PENDING_PAYMENT --(I've Paid)--> AWAITING_VERIFICATION --(staff confirms)--> CONFIRMED
            |                                    |
-           |--(hold expires)--> EXPIRED         |--(patient)--> CANCELLED
+           |--(hold expires)--> EXPIRED         |--(staff rejects)--> CANCELLED
+                                                |--(patient cancels)--> CANCELLED
+
+"I've Paid" is a patient CLAIM, not a payment. UPI here is peer-to-peer with no
+gateway (PROJECT_PLAN.md §1 non-goals), so no code in this project can observe
+that money moved. Only a human comparing the clinic's bank statement can, which
+is what `confirm_booking` / `reject_payment` and the `clinic_admin.py payments`
+command exist for. Nothing else may ever set CONFIRMED.
 """
 
 from __future__ import annotations
@@ -109,12 +116,80 @@ def create_hold(
 
 
 def declare_paid(session: Session, booking: Booking) -> Booking:
-    """Patient tapped 'I've Paid'. Payment is verified by clinic staff, not by us."""
+    """Patient tapped 'I've Paid'.
+
+    This is a CLAIM, not a payment. There is no payment gateway (PROJECT_PLAN.md
+    §1 non-goals), so nothing here can prove money moved. The booking therefore
+    goes to AWAITING_VERIFICATION and stays there until a human at the clinic
+    confirms or rejects it via `scripts/clinic_admin.py`.
+
+    The hold is cleared deliberately: a patient who has genuinely paid must not
+    lose their slot to a 15-minute timer. The cost is that a false claim occupies
+    a slot until staff review it, which is why `pending_verification()` exists
+    and why the CLI sorts oldest-first.
+    """
     if booking.status == BookingStatus.PENDING_PAYMENT:
         booking.status = BookingStatus.AWAITING_VERIFICATION
         booking.paid_declared_at = clock.now()
         booking.hold_expires_at = None
         session.flush()
+    return booking
+
+
+def record_payment_ref(session: Session, booking: Booking, payment_ref: str) -> Booking:
+    """Store the UPI reference the patient typed. Self-declared, never proof."""
+    booking.payment_ref = payment_ref.strip()[:32]
+    session.flush()
+    return booking
+
+
+def pending_verification(session: Session, limit: int = 200) -> list[Booking]:
+    """Bookings a human still has to check, oldest declaration first."""
+    return list(
+        session.scalars(
+            select(Booking)
+            .where(Booking.status == BookingStatus.AWAITING_VERIFICATION)
+            .order_by(Booking.paid_declared_at.asc())
+            .limit(limit)
+        )
+    )
+
+
+def confirm_booking(session: Session, booking: Booking, verified_by: str = "staff") -> Booking:
+    """Staff matched the payment against the clinic's own statement."""
+    if booking.status is not BookingStatus.AWAITING_VERIFICATION:
+        raise ValueError(
+            f"{booking.ref} is {booking.status.value}, not AWAITING_VERIFICATION — "
+            f"only a booking awaiting verification can be confirmed"
+        )
+    booking.status = BookingStatus.CONFIRMED
+    booking.verified_at = clock.now()
+    booking.verified_by = (verified_by or "staff")[:64]
+    booking.hold_expires_at = None
+    session.flush()
+    log.info("Booking %s confirmed by %s", booking.ref, booking.verified_by)
+    return booking
+
+
+def reject_payment(
+    session: Session,
+    booking: Booking,
+    verified_by: str = "staff",
+    reason: str = "payment not received",
+) -> Booking:
+    """Staff could not find the payment. Frees the slot for someone else."""
+    if booking.status is not BookingStatus.AWAITING_VERIFICATION:
+        raise ValueError(
+            f"{booking.ref} is {booking.status.value}, not AWAITING_VERIFICATION — "
+            f"only a booking awaiting verification can be rejected"
+        )
+    booking.status = BookingStatus.CANCELLED
+    booking.cancelled_reason = reason[:200]
+    booking.verified_at = clock.now()
+    booking.verified_by = (verified_by or "staff")[:64]
+    booking.hold_expires_at = None
+    session.flush()
+    log.info("Booking %s rejected by %s: %s", booking.ref, booking.verified_by, reason)
     return booking
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from functools import lru_cache
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
@@ -112,6 +113,31 @@ class ClinicInfo(BaseModel):
         if not cleaned.startswith("+"):
             raise ValueError("clinic.phone must be in international format, e.g. +919000000000")
         return cleaned
+
+    @field_validator("timezone")
+    @classmethod
+    def _check_timezone(cls, v: str) -> str:
+        """The timezone must resolve NOW, not when the first patient books.
+
+        Windows ships no IANA database, so this fails without the `tzdata`
+        package. Silently falling back to machine-local time would compute every
+        slot, min-notice window and hold expiry in the wrong zone.
+        """
+        name = v.strip()
+        try:
+            ZoneInfo(name)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(
+                f"clinic.timezone {name!r} is not available on this machine. "
+                f"If the name is correct, the IANA time zone database is missing — "
+                f"install it with: pip install tzdata"
+            ) from exc
+        except (ValueError, OSError) as exc:
+            raise ValueError(
+                f"clinic.timezone {name!r} is not a valid IANA zone, "
+                f"e.g. 'Asia/Kolkata'"
+            ) from exc
+        return name
 
 
 class BookingRules(BaseModel):

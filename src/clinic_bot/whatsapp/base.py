@@ -172,17 +172,6 @@ class ListMessage(OutboundMessage):
         object.__setattr__(self, "button_title", _clip(self.button_title, LIST_BUTTON_TITLE_MAX))
 
 
-@dataclass(frozen=True)
-class ImageMessage(OutboundMessage):
-    """Image sent by public URL. Meta fetches the URL, so it must be reachable."""
-
-    image_url: str
-    caption: str = ""
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "caption", _clip(self.caption, BODY_MAX))
-
-
 @dataclass
 class Reply:
     """An ordered batch of outbound messages produced by one inbound message."""

@@ -5,16 +5,39 @@ system UPI app chooser, which is the most reliable path and the one we lead with
 
 App-specific schemes (GPay/PhonePe/Paytm/CRED) are *best effort*: vendors change
 them without notice and they behave differently on iOS. They are offered as
-secondary shortcuts on the payment page, never as the only route — the QR code and
-the copyable UPI ID always work regardless.
+secondary shortcuts on the payment page, never as the only route — the copyable
+UPI ID always works regardless.
+
+No QR image is generated (see PROJECT_PLAN.md D4, amended 2026-07-26). The patient
+pays from the same phone that holds the chat, so the app chooser and the copyable
+VPA cover the journey without carrying an image-rendering dependency.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
 from clinic_bot.clinic_config import ClinicConfig
+
+#: Booking refs appear in URLs, so their shape is enforced before any DB lookup.
+_SAFE_REF = re.compile(r"^[A-Z0-9\-]{3,32}$")
+
+
+class InvalidRefError(ValueError):
+    """A booking reference did not match the expected shape."""
+
+
+def validate_ref(ref: str) -> str:
+    if not _SAFE_REF.match(ref):
+        raise InvalidRefError(f"malformed booking ref: {ref!r}")
+    return ref
+
+
+def pay_url(base_url: str, ref: str) -> str:
+    """The clinic-scoped payment page URL sent to the patient."""
+    return f"{base_url.rstrip('/')}/pay/{validate_ref(ref)}"
 
 
 @dataclass(frozen=True)
@@ -65,7 +88,7 @@ def _query(params: dict[str, str]) -> str:
 def build_upi_uri(
     cfg: ClinicConfig, *, ref: str, amount: int | None = None, note: str | None = None
 ) -> str:
-    """The standard URI. This is what the QR code encodes."""
+    """The standard URI behind the 'Pay with any UPI app' button."""
     return f"upi://pay?{_query(upi_params(cfg, ref=ref, amount=amount, note=note))}"
 
 

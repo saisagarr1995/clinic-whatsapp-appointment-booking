@@ -1,0 +1,45 @@
+# CodeQL static security analysis. Free for public repositories.
+#
+# Complements the existing checks rather than duplicating them: bandit matches
+# known-bad patterns, pip-audit checks dependency CVEs, CodeQL follows data flow
+# — which is what finds an unvalidated path reaching a filesystem or SQL call.
+name: codeql
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+    branches: [main, "release/**"]
+  schedule:
+    # Weekly, so newly published queries run against unchanged code.
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: analyze python
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write   # required to upload the SARIF results
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"

@@ -17,7 +17,6 @@ from clinic_bot.whatsapp.base import (
     BODY_MAX,
     Button,
     ButtonMessage,
-    ImageMessage,
     ListMessage,
     Reply,
     Row,
@@ -310,17 +309,15 @@ def summary(
     )
 
 
-def payment(
-    to: str, *, cfg: ClinicConfig, ref: str, qr_image_url: str, pay_page_url: str
-) -> Reply:
-    """QR image, then instructions, then the action buttons.
+def payment(to: str, *, cfg: ClinicConfig, ref: str, pay_page_url: str) -> Reply:
+    """Payment instructions, then the action buttons.
 
-    Order matters: the image lands first so the instruction text reads as a
-    caption for the QR the patient can already see.
+    No QR image: the patient pays from the phone holding this chat, so the
+    payment page's app chooser and the copyable UPI ID cover the journey.
+    See PROJECT_PLAN.md D4 (amended 2026-07-26).
     """
     return Reply(
         [
-            ImageMessage(to=to, image_url=qr_image_url, caption=M.QR_CAPTION),
             TextMessage(
                 to=to,
                 body=M.payment_instructions(cfg, ref, pay_page_url),
@@ -338,6 +335,31 @@ def payment(
     )
 
 
+def ask_utr(to: str) -> Reply:
+    """Ask for the UPI reference so staff can match the payment."""
+    return Reply(
+        [
+            ButtonMessage(
+                to=to,
+                body=M.ASK_UTR,
+                buttons=[Button(ids.BTN_SKIP_UTR, M.UTR_SKIP_BTN)],
+            )
+        ]
+    )
+
+
+def utr_invalid(to: str) -> Reply:
+    return Reply(
+        [
+            ButtonMessage(
+                to=to,
+                body=M.UTR_INVALID,
+                buttons=[Button(ids.BTN_SKIP_UTR, M.UTR_SKIP_BTN)],
+            )
+        ]
+    )
+
+
 def paid(
     to: str,
     *,
@@ -347,6 +369,7 @@ def paid(
     doctor_name: str,
     starts_at: dt.datetime,
     today: dt.date,
+    payment_ref: str = "",
 ) -> Reply:
     return Reply(
         [
@@ -359,6 +382,7 @@ def paid(
                     starts_at=starts_at,
                     doctor_name=doctor_name,
                     today=today,
+                    payment_ref=payment_ref,
                 ),
             )
         ]

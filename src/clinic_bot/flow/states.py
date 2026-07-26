@@ -18,6 +18,7 @@ class State(enum.StrEnum):
     PICK_SLOT = "PICK_SLOT"
     SUMMARY = "SUMMARY"
     PAYMENT = "PAYMENT"
+    ASK_UTR = "ASK_UTR"
     PAID = "PAID"
 
     # Reschedule / cancel

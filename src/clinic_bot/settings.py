@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     )
 
     # --- Meta WhatsApp Cloud API ---
+    # Fallbacks only: a clinic's own config/secrets/<slug>.env takes precedence.
+    # Convenient when running a single clinic; ignored once each clinic has its own.
     whatsapp_phone_number_id: str = ""
-    whatsapp_business_account_id: str = ""
     whatsapp_access_token: str = ""
     whatsapp_app_secret: str = ""
     whatsapp_verify_token: str = ""
@@ -34,6 +35,16 @@ class Settings(BaseSettings):
     # --- Local ---
     database_url: str = "sqlite:///data/clinic.db"
     clinic_config_path: str = "config/clinic.yaml"
+    #: The fleet definition. Each clinic listed here gets its own config,
+    #: its own database file and its own Meta credentials.
+    clinics_registry_path: str = "config/clinics.yaml"
+    #: Directory holding per-clinic Meta credentials as <slug>.env. Gitignored.
+    secrets_dir: str = "config/secrets"
+    #: Mounts the offline simulator at /c/{slug}/sim. MUST stay false in
+    #: production: the simulator injects messages into the state machine without
+    #: a webhook signature, which is exactly what signature verification exists
+    #: to prevent. Off by default, and the routes are not registered when off.
+    simulator: bool = False
     # Localhost by default. In production Caddy terminates TLS and proxies inward,
     # so the app must never listen on a public interface. Override only if you
     # genuinely intend to expose it unproxied.
@@ -49,27 +60,8 @@ class Settings(BaseSettings):
     def _strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")
 
-    @property
-    def graph_url(self) -> str:
-        return f"https://graph.facebook.com/{self.whatsapp_api_version}"
-
-    @property
-    def messages_url(self) -> str:
-        return f"{self.graph_url}/{self.whatsapp_phone_number_id}/messages"
-
-    def missing_credentials(self) -> list[str]:
-        """Return the names of credentials that are required to talk to Meta but unset.
-
-        Used by setup.py and the /health endpoint so a misconfiguration surfaces at
-        setup time rather than when the first patient messages.
-        """
-        required = {
-            "WHATSAPP_PHONE_NUMBER_ID": self.whatsapp_phone_number_id,
-            "WHATSAPP_ACCESS_TOKEN": self.whatsapp_access_token,
-            "WHATSAPP_APP_SECRET": self.whatsapp_app_secret,
-            "WHATSAPP_VERIFY_TOKEN": self.whatsapp_verify_token,
-        }
-        return [name for name, value in required.items() if not value.strip()]
+    # Credential URLs and completeness checks live on registry.ClinicCredentials,
+    # because they are per clinic. Nothing process-wide should build a Graph URL.
 
 
 @lru_cache

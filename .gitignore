@@ -5,6 +5,11 @@
 *.pem
 *.key
 
+# Per-clinic Meta credentials. The template and the README are the only files
+# in config/secrets/ that may ever be committed.
+config/secrets/*.env
+!config/secrets/example.env.template
+
 # --- The single-prompt rebuild file. Explicitly excluded from GitHub. ---
 RECREATE_PROMPT.md
 
@@ -15,7 +20,6 @@ RECREATE_PROMPT.md
 *.sqlite3
 data/
 setup_state.json
-qrcodes/
 
 # --- Python ---
 .venv/

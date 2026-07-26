@@ -7,6 +7,7 @@ produce a clear error at setup time rather than a broken conversation later.
 from __future__ import annotations
 
 import textwrap
+from pathlib import Path
 
 import pytest
 import yaml
@@ -212,3 +213,36 @@ def test_top_level_must_be_a_mapping(tmp_path):
     path.write_text(textwrap.dedent("- a\n- b\n"), encoding="utf-8")
     with pytest.raises(ConfigError, match="mapping"):
         load_clinic_config(path)
+
+
+# --------------------------------------------------------------------------
+# Timezone
+# --------------------------------------------------------------------------
+
+
+def test_an_unresolvable_timezone_is_refused_at_load(tmp_path):
+    """Regression: a blanket `except Exception` used to swallow this.
+
+    Windows ships no IANA database, so ZoneInfo("Asia/Kolkata") raises unless
+    `tzdata` is installed. The old code caught it and silently used machine-local
+    time, computing every slot and hold expiry in the wrong zone with nothing
+    visibly failing. It must fail at config load instead.
+    """
+    from clinic_bot.clinic_config import ConfigError, load_clinic_config
+
+    raw = (Path("config/clinic.yaml")).read_text(encoding="utf-8")
+    broken = raw.replace('timezone: "Asia/Kolkata"', 'timezone: "Mars/Olympus_Mons"')
+    assert broken != raw, "fixture needs updating: timezone line not found"
+
+    path = tmp_path / "clinic.yaml"
+    path.write_text(broken, encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="timezone"):
+        load_clinic_config(path)
+
+
+def test_the_configured_timezone_actually_resolves(cfg):
+    """The shipped config must work on the machine running the tests."""
+    from zoneinfo import ZoneInfo
+
+    assert ZoneInfo(cfg.clinic.timezone) is not None

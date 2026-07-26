@@ -5,10 +5,10 @@ Print this. Work through it in order. Tick every box.
 - **Phone A** = the clinic's WhatsApp number (the Cloud API number)
 - **Phone B** = the patient (your second handset, whitelisted in the Meta dashboard)
 
-> The automated suite (`pytest`, 152 tests) already proves the conversation logic.
+> The automated suite (`pytest`, 202 tests) already proves the conversation logic.
 > This script exists to prove the things software cannot check by itself: that Meta
-> delivers the messages, that buttons render as buttons, that the QR scans, and that
-> a UPI app actually opens.
+> delivers the messages, that buttons render as buttons, and that a UPI app actually
+> opens with the right details.
 
 ---
 
@@ -16,12 +16,13 @@ Print this. Work through it in order. Tick every box.
 
 | # | Check | ✓ |
 |---|-------|---|
-| 0.1 | `sudo clinic-fleet list` shows the clinic as `active` / `ok` | ☐ |
-| 0.2 | `curl https://<domain>/c/<slug>/health` returns `"status":"ok"` | ☐ |
+| 0.1 | `python scripts/clinic_admin.py list` shows the clinic | ☐ |
+| 0.2 | `curl https://<domain>/health` returns `"status":"ok"` | ☐ |
 | 0.3 | Meta dashboard → webhook shows **Verified**, `messages` field subscribed | ☐ |
 | 0.4 | Phone B's number is in the Meta test-recipient list (max 5) | ☐ |
 | 0.5 | Phone B has at least one UPI app installed (GPay / PhonePe / Paytm) | ☐ |
-| 0.6 | Watch the logs while testing: `sudo clinic-fleet logs <slug>` | ☐ |
+| 0.6 | Watch the server console while testing (or `logsleet.log`) | ☐ |
+| 0.7 | **`SIMULATOR=false` in `.env`** — the app is publicly reachable now | ☐ |
 
 If 0.3 fails, nothing else will work. Fix it first.
 
@@ -106,15 +107,14 @@ Repeat 1.1 with `hello`, `Menu`, `start` — each must return the same welcome. 
 
 | # | From Phone B | Expected | ✓ |
 |---|--------------|----------|---|
-| 6.1 | Tap **Confirm** | A **QR code image** arrives | ☐ |
+| 6.1 | Tap **Confirm** | Payment message arrives (**no image** — the QR was removed) | ☐ |
 | 6.2 | | Booking reference shown (e.g. `SDC-K3M7Q`) | ☐ |
 | 6.3 | | UPI ID and UPI name shown, matching `clinic.yaml` | ☐ |
 | 6.4 | | Advance amount correct | ☐ |
 | 6.5 | | A payment link is present | ☐ |
 | 6.6 | | Separate message with buttons **I've Paid** and **Need Help** | ☐ |
-| 6.7 | Scan the QR with GPay | Opens with the **clinic's UPI ID and correct amount** pre-filled | ☐ |
 | 6.8 | Tap the payment link | Payment page opens in the browser | ☐ |
-| 6.9 | | Page shows amount, UPI ID, a **Copy** button, QR, and app buttons | ☐ |
+| 6.9 | | Page shows amount, UPI ID, a **Copy** button and the app buttons | ☐ |
 | 6.10 | Tap **Copy** | UPI ID copied to clipboard | ☐ |
 | 6.11 | Tap **Pay with any UPI app** | Android UPI app chooser opens | ☐ |
 | 6.12 | Tap **Google Pay** | GPay opens with details pre-filled | ☐ |
@@ -131,9 +131,24 @@ Repeat 1.1 with `hello`, `Menu`, `start` — each must return the same welcome. 
 |---|--------------|----------|---|
 | 7.1 | Tap **Need Help** | Clinic's phone number shown | ☐ |
 | 7.2 | | An **I've Paid** button is still available | ☐ |
-| 7.3 | Tap **I've Paid** | Thank-you message naming the patient | ☐ |
-| 7.4 | | Confirms reference, doctor, date, time, address | ☐ |
-| 7.5 | On the server: `sudo clinic-fleet list` | Clinic still healthy | ☐ |
+| 7.3 | Tap **I've Paid** | Asked for the **UPI reference number**, with a **Skip** button | ☐ |
+| 7.4 | Type `hello` | Politely refused, re-prompted — must not dead-end | ☐ |
+| 7.5 | Type a 12-digit reference | Thank-you naming the patient, echoing the reference | ☐ |
+| 7.6 | | Says the payment is **being verified** — NOT that it is confirmed | ☐ |
+| 7.7 | | Shows reference, doctor, date, time, address | ☐ |
+
+### Then, on the laptop — the staff half of the flow
+
+| # | Action | Expected | ✓ |
+|---|--------|----------|---|
+| 7.8 | `python scripts/clinic_admin.py payments <slug>` | The booking is listed, with the UPI reference the patient typed | ☐ |
+| 7.9 | Check that reference against the clinic's UPI/bank statement | It matches (or does not) | ☐ |
+| 7.10 | `... confirm <slug> <REF>` | Booking becomes `CONFIRMED` | ☐ |
+| 7.11 | `... payments <slug>` again | Queue is now empty | ☐ |
+| 7.12 | `... confirm <slug> <REF>` again | Refused — already confirmed | ☐ |
+
+> The patient is **not** messaged when you confirm. Telling them would need a paid
+> WhatsApp template message. Phone them if they need to hear it.
 
 ---
 
@@ -195,10 +210,10 @@ Step 8.4 is the one people get wrong. A 60-minute treatment must consume two 30-
 
 | # | Action | Expected | ✓ |
 |---|--------|----------|---|
-| 12.1 | Mid-booking, run `sudo clinic-fleet restart <slug>` | Conversation continues from the same step | ☐ |
+| 12.1 | Mid-booking, run restart the fleet (`run_local.ps1`) | Conversation continues from the same step | ☐ |
 | 12.2 | `sudo reboot` the VM | Bot comes back automatically, no manual start | ☐ |
 | 12.3 | Send `Hi` after reboot | Normal reply | ☐ |
-| 12.4 | `sudo clinic-fleet backup <slug>` | Backup created and integrity-checked | ☐ |
+| 12.4 | `Copy-Item data\clinics\<slug>.db backup.db` | A readable copy is produced | ☐ |
 
 ---
 
@@ -207,14 +222,14 @@ Step 8.4 is the one people get wrong. A 60-minute treatment must consume two 30-
 | # | Action | Expected | ✓ |
 |---|--------|----------|---|
 | 13.1 | Message clinic B's number | Clinic **B's** name and services — never clinic A's | ☐ |
-| 13.2 | `sudo clinic-fleet stop <clinic-a>` | Clinic B keeps working normally | ☐ |
+| 13.2 | set `enabled: false` for clinic A and restart | Clinic B keeps working normally | ☐ |
 | 13.3 | Compare booking references | Prefixes differ per clinic | ☐ |
 
 ---
 
 ## If something fails
 
-1. `sudo clinic-fleet logs <slug>` — the error is almost always here.
+1. The server console (or `logsleet.log`) — the error is almost always here.
 2. `curl http://127.0.0.1:<port>/health` — reports missing credentials explicitly.
 3. Meta dashboard → WhatsApp → Configuration → Webhook — check for delivery failures.
 4. Nothing arriving at all → webhook URL or verify token is wrong.
