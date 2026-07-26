@@ -290,3 +290,32 @@ def test_no_api_docs_are_exposed(client_and_adapter):
     client, _ = client_and_adapter
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
+
+
+# --------------------------------------------------------------------------
+# Log injection
+# --------------------------------------------------------------------------
+
+
+def test_network_supplied_values_cannot_forge_log_lines():
+    """Message ids and query params reach the log; newlines must not survive.
+
+    Without this an attacker could embed a newline in a WhatsApp id and write
+    fabricated entries into the clinic's log.
+    """
+    from clinic_bot.main import _safe
+
+    forged = "wamid.1\n2026-07-26 INFO  Payment verified for SDC-AAAAA"
+    cleaned = _safe(forged)
+
+    assert "\n" not in cleaned
+    assert "\r" not in cleaned
+    assert cleaned.startswith("wamid.1")
+
+
+def test_safe_truncates_and_handles_odd_input():
+    from clinic_bot.main import _safe
+
+    assert len(_safe("x" * 500)) == 64
+    assert "\n" not in _safe("a\r\nb")
+    assert _safe(None) == "None"

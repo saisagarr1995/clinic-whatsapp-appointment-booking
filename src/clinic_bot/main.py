@@ -190,7 +190,8 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
             log.info("Webhook verified by Meta for clinic %s", clinic.slug)
             return PlainTextResponse(challenge, status_code=200)
 
-        log.warning("Webhook verification rejected for %s (mode=%s)", clinic.slug, mode)
+        # `mode` is a raw query parameter — sanitize before it reaches the log.
+        log.warning("Webhook verification rejected for %s (mode=%s)", clinic.slug, _safe(mode))
         return PlainTextResponse("Forbidden", status_code=403)
 
     @app.post("/c/{slug}/webhook", include_in_schema=False)
@@ -231,13 +232,20 @@ def create_app(adapter=None) -> FastAPI:  # noqa: ANN001 - adapter is a Protocol
     return app
 
 
-def _safe(value: str, limit: int = 64) -> str:
-    """Make a webhook-supplied value safe to write into a log line.
+def _safe(value: object, limit: int = 64) -> str:
+    """Make a network-supplied value safe to write into a log line.
 
-    Message ids and WhatsApp ids arrive from the network. Without stripping
-    newlines an attacker could inject fabricated log entries.
+    Message ids, WhatsApp ids and query parameters all arrive from outside.
+    Without stripping line breaks an attacker could inject fabricated log
+    entries by embedding a newline in a value we log.
+
+    The newline replacements are written explicitly, in this order, because that
+    is the form static analysers recognise as a log-injection sanitizer; a
+    generator over `str.isprintable` is equivalent at runtime but opaque to them.
     """
-    return "".join(ch for ch in str(value) if ch.isprintable())[:limit]
+    text = str(value).replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    text = "".join(ch for ch in text if ch.isprintable())
+    return text[:limit]
 
 
 def _claim(clinic: Clinic, message_id: str) -> bool:
