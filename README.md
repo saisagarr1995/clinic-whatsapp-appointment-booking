@@ -17,9 +17,9 @@ app they already use.
 |---|---|
 | **AI cost** | ₹0 — deterministic state machine, no LLM anywhere |
 | **WhatsApp cost** | ₹0 — the bot only ever *replies*, which Meta bills as free service conversations |
-| **Infrastructure cost** | ₹0 — runs on an Oracle Cloud Always Free VM |
-| **Onboarding a clinic** | Edit one YAML file. No code changes, ever. |
-| **Capacity** | 50 clinics × 50 patients/day on a single free VM |
+| **Infrastructure cost** | ₹0 — runs on a laptop via Tailscale Funnel, or an Oracle Cloud Always Free VM |
+| **Onboarding a clinic** | Add a line to `config/clinics.yaml`. No code changes, ever. |
+| **Capacity** | 50 clinics × 50 patients/day. Measured: 82 MB for one clinic, 87 MB for five |
 
 Every dependency is MIT, Apache-2.0 or BSD. The bot runs on Meta's **official** WhatsApp
 Cloud API — it does not use reverse-engineered libraries, which violate WhatsApp's terms
@@ -59,6 +59,15 @@ Bot:     ✅ Appointment reserved! Reference: SDC-K3M7Q
          UPI ID: smiledental@okhdfcbank
          👉 Tap to pay: https://.../c/smile/pay/SDC-K3M7Q
          [I've Paid] [Need Help]
+
+Patient: (taps I've Paid)
+
+Bot:     Type the UPI reference number from your payment app  [Skip]
+
+Patient: 438291750163
+
+Bot:     🙏 Thank you, Rajesh! Your slot is reserved and your
+         payment is being verified.
 ```
 
 ---
@@ -71,12 +80,17 @@ Bot:     ✅ Appointment reserved! Reference: SDC-K3M7Q
 - **No double booking**, guaranteed by a database constraint rather than by application
   logic, so concurrent requests cannot both win
 - **Multi-slot appointments** — a 60-minute treatment correctly blocks two 30-minute slots
-- **UPI payment** — locally generated QR (no third-party QR service), copyable UPI ID, and
-  a payment page with GPay / PhonePe / Paytm / CRED / BHIM buttons
+- **UPI payment** — copyable UPI ID and a payment page with GPay / PhonePe / Paytm /
+  CRED / BHIM buttons
+- **Payment verification by a human** — the patient supplies their UPI reference, and
+  clinic staff confirm or reject it against the bank statement. The bot never claims a
+  payment was received, because it genuinely cannot know
 - **Slot holds** expire after 15 minutes so abandoned bookings free themselves
 - **Never dead-ends** — any unrecognised input re-prompts rather than going silent
 - **Survives restarts** mid-conversation; sessions live in the database
-- **Fleet management** — run many clinics on one server, fully isolated from each other
+- **Fleet management** — many clinics from one process, each with its own database and
+  its own Meta credentials; isolation proven by test
+- **Offline simulator** — validate the entire conversation with no Meta account
 
 ---
 
@@ -91,11 +105,11 @@ python -m venv .venv
 source .venv/bin/activate         # Linux/macOS
 
 pip install -e ".[dev]"
-cp .env.example .env              # fill in your Meta credentials
+cp .env.example .env              # Meta credentials are optional to start
 
-python -m clinic_bot.db.seed
-pytest -q                         # 152 tests, no network needed
-uvicorn clinic_bot.main:app --reload
+python scripts/clinic_admin.py seed smile
+pytest -q                         # 202 tests, no network needed
+.\scriptsun_local.ps1           # then open /c/smile/sim
 ```
 
 You do **not** need WhatsApp credentials to run the test suite — the whole conversation
@@ -103,26 +117,22 @@ flow is testable offline.
 
 ---
 
-## Production deployment
+## Running it
 
-See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the click-by-click Oracle Cloud setup.
+See **[docs/LOCAL_HOSTING.md](docs/LOCAL_HOSTING.md)** — start the fleet, add clinics,
+expose a public HTTPS webhook with Tailscale Funnel, and verify payments.
 
-```bash
-# On a fresh Oracle Always Free VM
-sudo bash deploy/install_server.sh
-
-# Then add clinics
-sudo clinic-fleet add smile-dental
-sudo clinic-fleet list
+```powershell
+.\scriptsun_local.ps1                                   # start the fleet
+python scripts\clinic_admin.py add ortho-care             # onboard a clinic
+python scripts\clinic_admin.py seed ortho-care
+python scripts\clinic_admin.py payments ortho-care        # who is awaiting verification
+python scripts\clinic_admin.py confirm ortho-care SDC-K3M7Q
 ```
 
-Each clinic gets its own process, its own database, its own Meta credentials and its own
-systemd service. Isolation is enforced by the operating system — one clinic cannot read
-another's data even if its process is compromised.
-
-```
-clinic-fleet add|remove|list|start|stop|restart|logs|health|backup|restore|deploy
-```
+One process serves every clinic at `/c/<slug>/`, each with its own SQLite database and
+its own Meta app secret — so a webhook signature valid for one clinic is rejected by
+every other.
 
 ---
 
@@ -169,7 +179,7 @@ message, rather than breaking a patient's booking later.
 | Document | What it covers |
 |---|---|
 | [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) | The locked plan, every decision and why |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Oracle Cloud setup, click by click |
+| [docs/LOCAL_HOSTING.md](docs/LOCAL_HOSTING.md) | Running the fleet, going live, verifying payments |
 | [docs/TWO_PHONE_TEST.md](docs/TWO_PHONE_TEST.md) | Manual test script for two handsets |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Build log, including every bug's root cause |
 | [docs/SESSION_STATE.md](docs/SESSION_STATE.md) | Current status and next steps |
@@ -180,7 +190,7 @@ message, rather than breaking a patient's booking later.
 ## Tech stack
 
 Python 3.12 · FastAPI · SQLAlchemy · SQLite · Jinja2 · httpx
-Meta WhatsApp Cloud API · Caddy · systemd
+Meta WhatsApp Cloud API · Tailscale Funnel · Caddy
 
 No AI libraries. No paid services. Nothing that phones home.
 

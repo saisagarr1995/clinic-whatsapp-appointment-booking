@@ -10,15 +10,15 @@
 | Field | Value |
 |-------|-------|
 | Last updated | 2026-07-26 |
-| Current phase | Multi-clinic fleet running locally; validated offline, never against real WhatsApp |
-| Current branch | `feature/CAB-0014` |
+| Current phase | Multi-clinic fleet complete incl. staff payment verification; never run against real WhatsApp |
+| Current branch | `feature/CAB-0014` (CAB-0015 committed on the same branch) |
 | Repository | https://github.com/saisagarr1995/clinic-whatsapp-appointment-booking |
 | Overall status | 🟢 Fleet runs on the laptop and the full flow is proven in the simulator · 🟡 Never run against real WhatsApp |
 | Blockers | Meta credentials do not exist yet — needs the user |
 
 ### Verification at last commit
 ```
-pytest      180 passed
+pytest      202 passed
 ruff        All checks passed
 bandit      0 high, 0 medium
 pip-audit   No known vulnerabilities found
@@ -39,9 +39,11 @@ memory      82.1 MB one clinic · 86.8 MB five clinics (measured RSS)
 - [x] Availability engine: breaks, closing time, min notice, multi-slot services
 - [x] Full FSM: welcome, services, contact, book new, reschedule, cancel, payment
 - [x] UPI QR, payment page with app intents, I've Paid / Need Help
-- [x] 152 tests; 5 bugs found and fixed (see `PROGRESS.md`)
-- [x] Fleet infrastructure: systemd template, Caddy, `clinic-fleet`, backups
-- [x] Docs: PLAN, PROGRESS, DEPLOYMENT, TWO_PHONE_TEST, SECURITY, README
+- [x] 202 tests; 7 bugs found and fixed (see `PROGRESS.md`)
+- [x] Clinic fleet: `config/clinics.yaml` registry, one process, DB per clinic
+- [x] Offline simulator, gated on `SIMULATOR` (default off)
+- [x] **Staff payment verification** — UTR capture + `payments`/`confirm`/`reject`
+- [x] Docs: PLAN, PROGRESS, LOCAL_HOSTING, TWO_PHONE_TEST, SECURITY, README
 - [x] `.claude` skills: project-context, session-handoff, whatsapp-flow, git-workflow, testing
 - [x] GitHub repo created (public), `main` + `release/1.0` protected, verified by a
       rejected direct push. Secret scanning, push protection and Dependabot enabled.
@@ -69,14 +71,16 @@ To go live, in order — all documented in `docs/LOCAL_HOSTING.md`:
 the test suite and the simulator. Message delivery, button rendering on a handset and
 UPI apps opening are all still unverified.
 
-## ⚠️ Inconsistency a future session must resolve
+## Resolved on 2026-07-26 (CAB-0015)
 
-`deploy/fleet.sh` and `deploy/clinic-bot@.service` still assume the **old**
-process-per-clinic model that D13 replaced on 2026-07-26. `deploy/Caddyfile` was
-updated for the new single-process model, but those two were not. **Do not follow
-`docs/DEPLOYMENT.md` for the Oracle VM until they are reconciled** — the systemd
-template would start one process per clinic against databases the single-process app
-also expects to own.
+The process-per-clinic deploy assets that contradicted D13 were **deleted**, not
+patched: `deploy/fleet.sh`, `deploy/clinic-bot@.service`, `deploy/clinic-bot.target`,
+`deploy/install_server.sh` and `docs/DEPLOYMENT.md`. They are recoverable from git
+history (commit `ffdf1fe`).
+
+`deploy/Caddyfile` survives and is correct for the single-process fleet. **If the
+Oracle VM path is ever revived, the systemd unit must be written fresh as ONE unit
+for the whole fleet**, not a per-clinic template.
 
 ### Remaining planned work (not blocking the above)
 
@@ -110,6 +114,7 @@ wizard reflects what the process actually turned out to be.
 | CAB-0012 | Fleet deployment infrastructure | ✅ done (auto-deploy outstanding; superseded in part by CAB-0014) |
 | CAB-0013 | Session handoff after initial build | ✅ done |
 | CAB-0014 | Laptop hosting, clinic registry, simulator, QR removal | ✅ done |
+| CAB-0015 | Payment verification, timezone fix, dead-code removal | ✅ done |
 
 ---
 
@@ -147,7 +152,9 @@ wizard reflects what the process actually turned out to be.
   process-per-clinic, for laptop memory). No shared tables, no `WHERE clinic_id`.
 - Routing: path-based `/c/<slug>/` so one certificate covers the fleet.
 - Simulator: gated on `SIMULATOR`, default **false**. Never on in production.
-- Admin dashboard: deferred out of 1.0.
+- Payment verification: **a human at the clinic**, via `clinic_admin.py confirm/reject`.
+  No gateway, no auto-reconciliation. Unverified claims are NOT auto-expired.
+- Admin dashboard: deferred out of 1.0. The staff CLI is the 1.0 answer.
 
 ---
 
@@ -171,6 +178,14 @@ wizard reflects what the process actually turned out to be.
   Meta and in payment links already sitting in patients' chats. Never rename a slug.
 - **Cross-clinic isolation is proven by test, not by the OS**, since D13 was amended.
   `tests/test_multi_clinic.py` is load-bearing — if it is ever weakened, revisit D13.
+- **`CONFIRMED` may only ever be set by `booking_service.confirm_booking`.** The bot
+  cannot see money move; if any patient-reachable path sets it, the clinic starts
+  giving away appointments for free. Guarded by `tests/test_payment_verification.py`.
+- **The bot must never tell a patient their payment is confirmed** — only that it is
+  being verified. A test asserts the exact phrases are absent.
+- **Never catch bare `Exception` around timezone or config lookups.** BUG-007 hid a
+  missing IANA database behind a blanket `except` for two sessions, silently computing
+  every appointment in the wrong timezone. Catch the specific error and log loudly.
 
 ---
 
@@ -179,4 +194,5 @@ wizard reflects what the process actually turned out to be.
 | Date | Session summary |
 |------|-----------------|
 | 2026-07-20 | Requirements gathered; plan locked; full product built and tested (152 tests); 5 bugs found and fixed; infrastructure redesigned twice as the user clarified hosting constraints and the 50-clinic scale target; GitHub repo created and protected. Nothing yet verified against real WhatsApp. |
+| 2026-07-26 | **CAB-0015.** User asked how the clinic would know a patient had really paid, and for a correctness + dead-code pass. Found `CONFIRMED` was unreachable and a false "I've Paid" held a slot forever with no staff tool (BUG-006), and that a blanket `except Exception` was hiding a missing IANA timezone database on Windows so every appointment used machine-local time (BUG-007). Added UTR capture, `payments`/`confirm`/`reject` staff commands, `tzdata` + timezone validation, and a fleet mixed-timezone guard. Removed `ImageMessage`, dead `Settings` members and the superseded process-per-clinic deploy assets. 180 → 202 tests. Server stopped at the user's request. |
 | 2026-07-26 | **CAB-0014.** User moved hosting to their laptop and asked for a multi-clinic fleet driven by one registry file, plus lower memory and no QR. Built `config/clinics.yaml` + `registry.py`; refactored three global singletons to be per-clinic; path-scoped every route to `/c/<slug>/`; per-clinic Meta credentials and signature verification. Removed the UPI QR and with it Pillow. Added a gated offline simulator, the `clinic_admin` CLI, Windows run/autostart scripts, CodeQL and Dependabot. 152 → 180 tests. Measured 82 MB for one clinic, 87 MB for five. Full booking driven end to end through the simulator. Still unverified against real WhatsApp. |

@@ -16,6 +16,7 @@ VM. Everything here is free and open source.
 | A clinic's Meta credentials (gitignored) | `config/secrets/<slug>.env` |
 | A clinic's database | `data/clinics/<slug>.db` |
 | Fleet admin CLI | `scripts/clinic_admin.py` |
+| **Verify payments (daily job)** | `clinic_admin.py payments / confirm / reject` — §4a |
 | Start the fleet | `scripts/run_local.ps1` |
 | Auto-start at logon | `scripts/install_autostart.ps1` |
 
@@ -154,6 +155,49 @@ you can message the bot from your own phone before touching a clinic's real numb
 
 ---
 
+## 4a. Verifying payments — the daily job
+
+**The bot cannot tell whether a patient actually paid.** UPI here is peer-to-peer with
+no gateway, so nothing in this software sees money arrive. "I've Paid" is a *claim*.
+
+After tapping it the patient is asked for their **UPI reference number (UTR)**, and the
+booking sits in `AWAITING_VERIFICATION` until a human decides.
+
+Someone at the clinic must do this, ideally once or twice a day:
+
+```powershell
+.venv\Scripts\python.exe scripts\clinic_admin.py payments smile
+```
+
+```
+  REF          AMOUNT   WAITING  UPI REF        PATIENT / APPOINTMENT
+  SDC-CVPYA       200      0.4h  438291750163   Sagar R · 919000000001 · Mon 27 Jul 09:00
+```
+
+Compare each UPI reference against the clinic's bank or UPI app statement, then:
+
+```powershell
+.venv\Scripts\python.exe scripts\clinic_admin.py confirm smile SDC-CVPYA --by priya
+.venv\Scripts\python.exe scripts\clinic_admin.py reject  smile SDC-CVPYA --reason "no credit found"
+```
+
+- **confirm** → `CONFIRMED`. This is the only way a booking ever becomes confirmed.
+- **reject** → `CANCELLED`, and **the slot is immediately free** for someone else.
+
+### Two things to understand
+
+**An unverified claim keeps its slot and never expires by itself.** That is deliberate —
+a patient who really paid must not lose their appointment to a timer. The cost is that a
+false claim blocks that slot until someone reviews it. The `WAITING` column exists so
+those stand out; anything above a few hours deserves a look.
+
+**The bot never tells the patient they are confirmed.** It says the payment is *being
+verified*. If you want the patient told once you confirm, that needs a WhatsApp template
+message, which Meta charges for — it would break the ₹0 guarantee, so it is deliberately
+not done. Phone them instead.
+
+---
+
 ## 5. Keep it running
 
 ```powershell
@@ -200,9 +244,10 @@ availability, and it is not small:
 | Laptop is also your daily machine | Accidental shutdown | None |
 
 For **validating, demoing and running your own first clinic**, this is fine. For
-several clinics whose patients depend on it, move to the Oracle VM in
-`docs/DEPLOYMENT.md` — migration is copying `data/clinics/*.db` across, because
-nothing else differs.
+several clinics whose patients depend on it, move to an always-on server. Migration is
+copying `data/clinics/*.db` across, because nothing else differs — the application code
+is identical. `deploy/Caddyfile` is ready for that; the systemd unit would need writing
+as one unit for the whole fleet (the old per-clinic template was removed in CAB-0015).
 
 ---
 
@@ -214,5 +259,8 @@ nothing else differs.
 | `/health` shows `missing_credentials` | `config/secrets/<slug>.env` is empty or absent |
 | Meta rejects the webhook | `PUBLIC_BASE_URL` is not `https://`, or Funnel is not running |
 | Simulator returns 404 | `SIMULATOR=false` in `.env` — that is the safe default |
+| `timezone ... is not available on this machine` | Install the IANA database: `.venv\Scripts\python.exe -m pip install tzdata` |
+| Slots appear at the wrong time | Check `clinic.timezone` in the clinic's YAML, then re-run `clinic_admin.py check` |
+| A booking never becomes CONFIRMED | Expected — only `clinic_admin.py confirm` does that. See §4a |
 | Buttons do nothing in the simulator | Check the server console; the reply id is logged on error |
 | Port 8000 already in use | `Get-NetTCPConnection -LocalPort 8000 -State Listen` |

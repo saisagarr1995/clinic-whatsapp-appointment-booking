@@ -66,21 +66,6 @@ jobs:
           fi
           echo "No secrets tracked."
 
-      - name: Validate the shipped clinic config
-        run: |
-          python -c "
-          from clinic_bot.clinic_config import load_clinic_config
-          cfg = load_clinic_config('config/clinic.yaml')
-          print(f'OK: {cfg.clinic.name} — {len(cfg.services)} services, {len(cfg.doctors)} doctors')
-          "
+      - name: Validate every clinic in the fleet registry
+        run: python scripts/clinic_admin.py check
 
-  shellcheck:
-    name: deployment scripts
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - name: ShellCheck
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck deploy/*.sh

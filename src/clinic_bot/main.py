@@ -72,9 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             slug, cfg.clinic.name, len(cfg.services), len(cfg.doctors), clinic.db_url,
         )
 
-        app.state.adapters[slug] = override or CloudApiAdapter(
-            settings, credentials=clinic.credentials
-        )
+        app.state.adapters[slug] = override or CloudApiAdapter(clinic.credentials)
 
         missing = clinic.credentials.missing()
         if missing and not settings.testing:

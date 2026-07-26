@@ -293,3 +293,105 @@ simulator end to end (`SDC-ALE7Y`), and the payment page rendered with a working
 process-per-clinic model and were **not** reworked. `deploy/Caddyfile` was updated
 to pass `/c/<slug>/` through unchanged. The VM path must be reconciled before
 `DEPLOYMENT.md` is followed again — noted in `SESSION_STATE.md`.
+
+---
+
+# Session 3 — 2026-07-26 — CAB-0015: payment verification, and two latent bugs
+
+The user asked how the clinic would know a patient had really paid, and for a
+correctness pass plus dead-code removal. Both questions had real answers.
+
+## BUG-006 — `CONFIRMED` was unreachable; a false claim held a slot forever
+
+`booking_service` documented `AWAITING_VERIFICATION --(staff)--> CONFIRMED`, but
+**no code path anywhere set `CONFIRMED`**, and there was no staff-facing interface
+of any kind. Combined with `declare_paid()` clearing `hold_expires_at`, and
+`expire_stale_holds()` only sweeping `PENDING_PAYMENT`, the consequences were:
+
+* Any patient could tap "I've Paid" without paying and occupy that slot permanently.
+* Nobody at the clinic could see, confirm or reject the claim.
+* `CONFIRMED` was dead enum weight.
+
+**Cause.** The plan (§1 non-goals) said "clinic staff verify" and the admin dashboard
+was deferred out of 1.0 — so the verification step was specified but never built, and
+nothing failed loudly because the happy path looked complete to the patient.
+
+**Fix.** Three parts, none of which pretend the software can see money move:
+
+1. After "I've Paid" the patient is asked for their **UPI reference (UTR)** — a new
+   `ASK_UTR` state with a `Skip` button. Stored on the booking as patient-supplied
+   text, explicitly not treated as proof.
+2. `confirm_booking()` / `reject_payment()` — the only writers of `CONFIRMED`. Both
+   refuse to act on a booking that is not `AWAITING_VERIFICATION`, so a cancelled or
+   unpaid booking cannot be confirmed by a typo. `reject` frees the slot at once.
+3. `clinic_admin.py payments|confirm|reject` — the staff queue, oldest wait first.
+
+Deliberately **not** done: auto-expiring unverified claims. A patient who genuinely
+paid must not lose their appointment to a timer. The cost — a false claim blocks a
+slot until reviewed — is stated in `PROJECT_PLAN.md` §3.1.1 and surfaced by the
+`WAITING` column.
+
+Also deliberately not done: messaging the patient on confirmation. That needs a paid
+WhatsApp template message and would break the ₹0 guarantee.
+
+Copy changed so the bot no longer says "Your appointment is booked" on a mere claim;
+it now says the payment is *being verified*. A test asserts the bot never claims
+"payment received" / "appointment is confirmed".
+
+## BUG-007 — the clinic timezone was silently ignored on Windows
+
+`clock._clinic_zone()` caught `(ZoneInfoNotFoundError, Exception)` — a blanket catch
+that swallowed everything and returned `None`, falling back to machine-local time.
+
+Windows ships no IANA time zone database, so `ZoneInfo("Asia/Kolkata")` **always
+raised on this laptop**. Every slot, min-notice window and hold expiry was being
+computed in the laptop's local time, not the clinic's.
+
+It was invisible because the laptop is already on IST, so local time and Asia/Kolkata
+agreed to the minute — and the test suite freezes the clock, so `_clinic_zone()` was
+never exercised. It surfaced only when the blanket `except` was narrowed during this
+pass and the app started returning 500s.
+
+**Fix.** Added `tzdata` (Apache-2.0, justified in PLAN §4); `ClinicInfo.timezone` now
+validates that the zone resolves at config load, so a bad or unavailable timezone
+fails at `clinic_admin.py check` rather than mid-conversation; `clock` logs loudly
+instead of silently falling back. Regression test included.
+
+## Fleet timezone guard
+
+`clock` is process-wide but the fleet is not, so two clinics in different timezones
+would have had one of them silently computed in the other's local time.
+`registry.validate_all()` now refuses to start such a fleet with an explicit message.
+Making `clock` per-clinic is the expensive fix, and is only worth it if this is hit.
+
+## Removed
+
+* `ImageMessage` and its Cloud API payload branch, `FakeAdapter.images()` and the
+  simulator's image rendering — dead since the QR was dropped in CAB-0014.
+* `Settings.graph_url`, `Settings.messages_url`, `Settings.missing_credentials()`,
+  `whatsapp_business_account_id` — superseded by per-clinic `ClinicCredentials`.
+  `CloudApiAdapter` now *requires* credentials; there is no process-wide Meta identity.
+* `deploy/fleet.sh`, `deploy/clinic-bot@.service`, `deploy/clinic-bot.target`,
+  `deploy/install_server.sh`, `docs/DEPLOYMENT.md` — all built on the
+  process-per-clinic model that D13 replaced. They would have started one process per
+  clinic against databases the single fleet process owns. Recoverable from git history
+  (commit `ffdf1fe`) if the VM path is rebuilt.
+* The CI `shellcheck` job, which had no shell scripts left to check. CI now validates
+  the whole fleet registry via `clinic_admin.py check` instead of one hardcoded file.
+
+## Verification
+
+```
+pytest      202 passed   (was 180)
+ruff        All checks passed
+bandit      No issues identified
+pip-audit   No known vulnerabilities found
+```
+
+Driven live end to end, not only in tests: booking → "I've Paid" → a rejected junk
+UTR → a valid UTR → staff queue → confirm → queue empty → double-confirm correctly
+refused.
+
+**Schema note.** `bookings` gained `payment_ref`, `verified_at`, `verified_by`.
+`create_all()` does not alter existing tables and there is no migration framework
+(PLAN §4), so existing databases must be recreated. Only throwaway local data existed.

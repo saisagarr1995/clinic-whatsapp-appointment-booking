@@ -152,12 +152,7 @@
     var box = el('div', 'msg');
 
     if (m.header) box.appendChild(el('div', 'hdr', m.header));
-    if (m.kind === 'image') {
-      box.appendChild(el('div', '', '[image] ' + (m.url || '')));
-      if (m.body) box.appendChild(el('div', '', m.body));
-    } else {
-      box.appendChild(el('div', '', m.body || ''));
-    }
+    box.appendChild(el('div', '', m.body || ''));
     if (m.footer) box.appendChild(el('div', 'ftr', m.footer));
 
     if (m.kind === 'buttons') {

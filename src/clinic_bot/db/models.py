@@ -181,6 +181,13 @@ class Booking(Base):
     patient_name: Mapped[str] = mapped_column(String(120), default="")
     hold_expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     paid_declared_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    #: UPI transaction reference (UTR) the patient typed after declaring payment.
+    #: The clinic matches this against their bank statement. Empty when skipped —
+    #: it is patient-supplied and self-declared, never proof of payment on its own.
+    payment_ref: Mapped[str] = mapped_column(String(32), default="")
+    #: Who marked this verified, and when. Set only by the staff CLI.
+    verified_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    verified_by: Mapped[str] = mapped_column(String(64), default="")
     cancelled_reason: Mapped[str] = mapped_column(String(200), default="")
 
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_now)

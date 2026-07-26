@@ -19,10 +19,8 @@ from typing import Any
 
 import httpx
 
-from clinic_bot.settings import Settings, get_settings
 from clinic_bot.whatsapp.base import (
     ButtonMessage,
-    ImageMessage,
     ListMessage,
     OutboundMessage,
     Reply,
@@ -66,12 +64,6 @@ def build_payload(message: OutboundMessage) -> dict[str, Any]:
             "type": "text",
             "text": {"body": message.body, "preview_url": message.preview_url},
         }
-
-    if isinstance(message, ImageMessage):
-        image: dict[str, Any] = {"link": message.image_url}
-        if message.caption:
-            image["caption"] = message.caption
-        return {**base, "type": "image", "image": image}
 
     if isinstance(message, ButtonMessage):
         interactive: dict[str, Any] = {
@@ -198,34 +190,27 @@ class CloudApiAdapter:
 
     def __init__(
         self,
-        settings: Settings | None = None,
+        credentials,  # noqa: ANN001 - registry.ClinicCredentials; typed here would circular-import
         client: httpx.Client | None = None,
-        credentials=None,  # noqa: ANN001 - registry.ClinicCredentials, avoids a circular import
     ):
-        self._settings = settings or get_settings()
+        if credentials is None:
+            raise ValueError(
+                "CloudApiAdapter requires the clinic's credentials — there is no "
+                "process-wide Meta identity in a multi-clinic fleet"
+            )
         self._creds = credentials
         self._client = client or httpx.Client(timeout=20.0)
-
-    @property
-    def _access_token(self) -> str:
-        if self._creds is not None:
-            return self._creds.access_token
-        return self._settings.whatsapp_access_token
-
-    @property
-    def _messages_url(self) -> str:
-        if self._creds is not None:
-            return self._creds.messages_url
-        return self._settings.messages_url
 
     def send(self, message: OutboundMessage) -> str | None:
         payload = build_payload(message)
         headers = {
-            "Authorization": f"Bearer {self._access_token}",
+            "Authorization": f"Bearer {self._creds.access_token}",
             "Content-Type": "application/json",
         }
         try:
-            response = self._client.post(self._messages_url, json=payload, headers=headers)
+            response = self._client.post(
+                self._creds.messages_url, json=payload, headers=headers
+            )
         except httpx.HTTPError as exc:
             raise WhatsAppSendError(f"Network error contacting Meta: {exc}") from exc
 

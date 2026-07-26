@@ -220,6 +220,36 @@ def load_registry(path: str | Path | None = None) -> dict[str, Clinic]:
     return clinics
 
 
+def _assert_one_timezone(clinics: dict[str, Clinic]) -> None:
+    """Refuse to serve clinics in different timezones from one process.
+
+    `scheduling.clock` is process-wide: it resolves "now" once, from the default
+    clinic config. If two clinics disagreed on their timezone, one of them would
+    silently get slot times, min-notice windows and hold expiry computed in the
+    other's local time — wrong appointments, with nothing visibly failing.
+
+    Failing loudly here is the cheap correct answer. Making `clock` per clinic is
+    the expensive one, and is only worth doing if this limit is ever hit.
+    """
+    zones: dict[str, list[str]] = {}
+    for slug, clinic in clinics.items():
+        try:
+            tz = clinic.config.clinic.timezone
+        except ConfigError:
+            continue  # validate_all() reports config errors with better context
+        zones.setdefault(tz, []).append(slug)
+
+    if len(zones) > 1:
+        detail = "; ".join(f"{tz}: {', '.join(sorted(s))}" for tz, s in sorted(zones.items()))
+        raise RegistryError(
+            "clinics in this fleet disagree on their timezone, and one process "
+            "cannot serve both correctly — appointment times would be wrong for "
+            f"one of them.\n  {detail}\n"
+            "Give every clinic the same `clinic.timezone`, or run a second "
+            "instance with its own registry for the other timezone."
+        )
+
+
 # --------------------------------------------------------------------------
 # Process-wide cache
 # --------------------------------------------------------------------------
@@ -253,12 +283,17 @@ def validate_all() -> list[tuple[str, str]]:
     Called at startup so a broken clinic.yaml is reported when the operator can
     still fix it, rather than when a patient sends the first message.
     """
+    clinics = get_registry()
     problems: list[tuple[str, str]] = []
-    for slug, clinic in get_registry().items():
+    for slug, clinic in clinics.items():
         try:
-            clinic.config  # noqa: B018 - property access performs the load
+            _ = clinic.config  # property access performs the load
         except ConfigError as exc:
             problems.append((slug, str(exc)))
+
+    # Only meaningful once the configs above have loaded.
+    if not problems:
+        _assert_one_timezone(clinics)
     return problems
 
 

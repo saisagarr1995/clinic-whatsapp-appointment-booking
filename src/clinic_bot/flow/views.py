@@ -335,6 +335,31 @@ def payment(to: str, *, cfg: ClinicConfig, ref: str, pay_page_url: str) -> Reply
     )
 
 
+def ask_utr(to: str) -> Reply:
+    """Ask for the UPI reference so staff can match the payment."""
+    return Reply(
+        [
+            ButtonMessage(
+                to=to,
+                body=M.ASK_UTR,
+                buttons=[Button(ids.BTN_SKIP_UTR, M.UTR_SKIP_BTN)],
+            )
+        ]
+    )
+
+
+def utr_invalid(to: str) -> Reply:
+    return Reply(
+        [
+            ButtonMessage(
+                to=to,
+                body=M.UTR_INVALID,
+                buttons=[Button(ids.BTN_SKIP_UTR, M.UTR_SKIP_BTN)],
+            )
+        ]
+    )
+
+
 def paid(
     to: str,
     *,
@@ -344,6 +369,7 @@ def paid(
     doctor_name: str,
     starts_at: dt.datetime,
     today: dt.date,
+    payment_ref: str = "",
 ) -> Reply:
     return Reply(
         [
@@ -356,6 +382,7 @@ def paid(
                     starts_at=starts_at,
                     doctor_name=doctor_name,
                     today=today,
+                    payment_ref=payment_ref,
                 ),
             )
         ]

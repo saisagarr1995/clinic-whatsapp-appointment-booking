@@ -236,27 +236,51 @@ def payment_instructions(cfg: ClinicConfig, ref: str, pay_url: str) -> str:
 
 PAYMENT_CTA = "Once you have paid, tap *I've Paid* below."
 
+# --- Payment reference (UTR) ---
+ASK_UTR = (
+    "Almost done! 🙏\n\n"
+    "Please type the *UPI reference number* from your payment app "
+    "(also called UTR or transaction ID — usually 12 digits).\n\n"
+    "It appears on the payment success screen, and it lets our team match "
+    "your payment quickly.\n\n"
+    "If you cannot find it, tap *Skip* — we will still verify manually."
+)
+UTR_INVALID = (
+    "That does not look like a UPI reference number. It is usually 12 digits, "
+    "shown on your payment success screen.\n\n"
+    "Please type it again, or tap *Skip*."
+)
+UTR_SKIP_BTN = "Skip"
+
 
 def paid_thanks(cfg: ClinicConfig, *, patient_name: str, ref: str, starts_at: dt.datetime,
-                doctor_name: str, today: dt.date) -> str:
-    return "\n".join(
-        [
-            f"🎉 *Thank you, {patient_name}!*",
-            "",
-            "Your appointment is booked. We look forward to seeing you! 😊",
-            "",
-            f"🔖 *Reference:* {ref}",
-            f"👨‍⚕️ *Doctor:* {doctor_name}",
-            f"📅 *Date:* {fmt_date(starts_at.date(), today=today)}",
-            f"🕐 *Time:* {fmt_time(starts_at)}",
-            f"📍 {cfg.clinic.address}",
-            "",
-            "_Our team will verify your payment shortly. "
-            "Please arrive 10 minutes early._",
-            "",
-            f"Need anything? Call us on {cfg.clinic.phone}",
-        ]
-    )
+                doctor_name: str, today: dt.date, payment_ref: str = "") -> str:
+    """Acknowledge the declaration WITHOUT claiming the payment is confirmed.
+
+    The clinic verifies against its own bank statement; saying "booked and
+    confirmed" here would be a lie the patient could reasonably rely on.
+    """
+    lines = [
+        f"🙏 *Thank you, {patient_name}!*",
+        "",
+        "Your slot is reserved and your payment is being verified.",
+        "",
+        f"🔖 *Reference:* {ref}",
+        f"👨‍⚕️ *Doctor:* {doctor_name}",
+        f"📅 *Date:* {fmt_date(starts_at.date(), today=today)}",
+        f"🕐 *Time:* {fmt_time(starts_at)}",
+    ]
+    if payment_ref:
+        lines.append(f"💳 *Your UPI reference:* {payment_ref}")
+    lines += [
+        f"📍 {cfg.clinic.address}",
+        "",
+        "_Our team will check your payment and confirm this appointment. "
+        "Please arrive 10 minutes early._",
+        "",
+        f"Any question? Call us on {cfg.clinic.phone}",
+    ]
+    return "\n".join(lines)
 
 
 def need_help(cfg: ClinicConfig) -> str:

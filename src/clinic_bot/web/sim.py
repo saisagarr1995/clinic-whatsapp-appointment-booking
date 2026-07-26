@@ -28,7 +28,6 @@ from clinic_bot.db.models import ConversationSession
 from clinic_bot.registry import Clinic, clinic_dependency
 from clinic_bot.whatsapp.base import (
     ButtonMessage,
-    ImageMessage,
     ListMessage,
     OutboundMessage,
     TextMessage,
@@ -87,9 +86,6 @@ def _serialize(message: OutboundMessage) -> dict[str, Any]:
                 for s in message.sections
             ],
         }
-
-    if isinstance(message, ImageMessage):
-        return {"kind": "image", "body": message.caption, "url": message.image_url}
 
     return {"kind": "text", "body": str(message)}
 

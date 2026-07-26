@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     )
 
     # --- Meta WhatsApp Cloud API ---
+    # Fallbacks only: a clinic's own config/secrets/<slug>.env takes precedence.
+    # Convenient when running a single clinic; ignored once each clinic has its own.
     whatsapp_phone_number_id: str = ""
-    whatsapp_business_account_id: str = ""
     whatsapp_access_token: str = ""
     whatsapp_app_secret: str = ""
     whatsapp_verify_token: str = ""
@@ -59,27 +60,8 @@ class Settings(BaseSettings):
     def _strip_trailing_slash(cls, v: str) -> str:
         return v.rstrip("/")
 
-    @property
-    def graph_url(self) -> str:
-        return f"https://graph.facebook.com/{self.whatsapp_api_version}"
-
-    @property
-    def messages_url(self) -> str:
-        return f"{self.graph_url}/{self.whatsapp_phone_number_id}/messages"
-
-    def missing_credentials(self) -> list[str]:
-        """Return the names of credentials that are required to talk to Meta but unset.
-
-        Used by setup.py and the /health endpoint so a misconfiguration surfaces at
-        setup time rather than when the first patient messages.
-        """
-        required = {
-            "WHATSAPP_PHONE_NUMBER_ID": self.whatsapp_phone_number_id,
-            "WHATSAPP_ACCESS_TOKEN": self.whatsapp_access_token,
-            "WHATSAPP_APP_SECRET": self.whatsapp_app_secret,
-            "WHATSAPP_VERIFY_TOKEN": self.whatsapp_verify_token,
-        }
-        return [name for name, value in required.items() if not value.strip()]
+    # Credential URLs and completeness checks live on registry.ClinicCredentials,
+    # because they are per clinic. Nothing process-wide should build a Graph URL.
 
 
 @lru_cache

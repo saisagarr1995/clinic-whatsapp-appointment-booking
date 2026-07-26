@@ -9,6 +9,12 @@ files. No code change is ever needed to onboard a clinic.
     python scripts/clinic_admin.py check
     python scripts/clinic_admin.py webhook ortho-care
 
+Payment verification — a booking only becomes CONFIRMED through these:
+
+    python scripts/clinic_admin.py payments ortho-care     # who is waiting
+    python scripts/clinic_admin.py confirm  ortho-care SDC-ALE7Y
+    python scripts/clinic_admin.py reject   ortho-care SDC-ALE7Y
+
 Run it through the venv interpreter:
     .venv\\Scripts\\python.exe scripts/clinic_admin.py list
 """
@@ -163,6 +169,99 @@ def cmd_check(_args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------
+# Payment verification — the only path to CONFIRMED
+# --------------------------------------------------------------------------
+
+
+def _resolve_clinic(slug: str):  # noqa: ANN202
+    clinic = get_registry().get(slug)
+    if clinic is None:
+        print(f"{BAD} unknown clinic {slug!r}")
+    return clinic
+
+
+def cmd_payments(args: argparse.Namespace) -> int:
+    """List bookings a human still has to check against the bank statement."""
+    from clinic_bot.booking_service import pending_verification
+    from clinic_bot.scheduling import clock
+
+    clinic = _resolve_clinic(args.slug)
+    if clinic is None:
+        return 1
+
+    with clinic.session() as db:
+        pending = pending_verification(db)
+        if not pending:
+            print("\nNothing awaiting verification.\n")
+            return 0
+
+        now = clock.now()
+        print(f"\n{len(pending)} booking(s) awaiting payment verification — oldest first\n")
+        print(f"  {'REF':<12} {'AMOUNT':>7}  {'WAITING':>9}  {'UPI REF':<16} PATIENT / APPOINTMENT")
+        print("  " + "-" * 88)
+        for b in pending:
+            waited = now - b.paid_declared_at if b.paid_declared_at else None
+            hours = f"{waited.total_seconds() / 3600:.1f}h" if waited else "?"
+            utr = b.payment_ref or "(not given)"
+            when = b.starts_at.strftime("%a %d %b %H:%M")
+            print(
+                f"  {b.ref:<12} {b.amount:>7}  {hours:>9}  {utr:<16} "
+                f"{b.patient_name} · {b.patient.wa_id} · {when} · {b.doctor.name}"
+            )
+
+        print("\nCheck each UPI reference against the clinic's bank/UPI statement, then:")
+        print(f"  python scripts/clinic_admin.py confirm {args.slug} <REF>")
+        print(f"  python scripts/clinic_admin.py reject  {args.slug} <REF>\n")
+        print("A rejected booking frees the slot immediately.\n")
+    return 0
+
+
+def cmd_confirm(args: argparse.Namespace) -> int:
+    from clinic_bot.booking_service import booking_by_ref, confirm_booking
+
+    clinic = _resolve_clinic(args.slug)
+    if clinic is None:
+        return 1
+
+    with clinic.session() as db:
+        booking = booking_by_ref(db, args.ref)
+        if booking is None:
+            print(f"{BAD} no booking {args.ref!r} at {args.slug}")
+            return 1
+        try:
+            confirm_booking(db, booking, verified_by=args.by)
+        except ValueError as exc:
+            print(f"{BAD} {exc}")
+            return 1
+        print(f"{OK} {booking.ref} CONFIRMED for {booking.patient_name} "
+              f"({booking.starts_at:%a %d %b %H:%M})")
+    return 0
+
+
+def cmd_reject(args: argparse.Namespace) -> int:
+    from clinic_bot.booking_service import booking_by_ref, reject_payment
+
+    clinic = _resolve_clinic(args.slug)
+    if clinic is None:
+        return 1
+
+    with clinic.session() as db:
+        booking = booking_by_ref(db, args.ref)
+        if booking is None:
+            print(f"{BAD} no booking {args.ref!r} at {args.slug}")
+            return 1
+        try:
+            reject_payment(db, booking, verified_by=args.by, reason=args.reason)
+        except ValueError as exc:
+            print(f"{BAD} {exc}")
+            return 1
+        print(f"{OK} {booking.ref} rejected and CANCELLED — the slot is free again.")
+        print("     Call the patient if they believe they did pay: "
+              f"{booking.patient.wa_id}")
+    return 0
+
+
 def cmd_webhook(args: argparse.Namespace) -> int:
     """Print exactly what to paste into the Meta dashboard."""
     clinics = get_registry()
@@ -202,6 +301,23 @@ def main() -> int:
     p_seed.set_defaults(func=cmd_seed)
 
     sub.add_parser("check", help="validate every clinic config").set_defaults(func=cmd_check)
+
+    p_pay = sub.add_parser("payments", help="list bookings awaiting payment verification")
+    p_pay.add_argument("slug")
+    p_pay.set_defaults(func=cmd_payments)
+
+    p_conf = sub.add_parser("confirm", help="mark a payment as received")
+    p_conf.add_argument("slug")
+    p_conf.add_argument("ref", help="booking reference, e.g. SDC-ALE7Y")
+    p_conf.add_argument("--by", default="staff", help="who verified it")
+    p_conf.set_defaults(func=cmd_confirm)
+
+    p_rej = sub.add_parser("reject", help="payment not found — cancel and free the slot")
+    p_rej.add_argument("slug")
+    p_rej.add_argument("ref")
+    p_rej.add_argument("--by", default="staff")
+    p_rej.add_argument("--reason", default="payment not received")
+    p_rej.set_defaults(func=cmd_reject)
 
     p_hook = sub.add_parser("webhook", help="print the Meta webhook settings")
     p_hook.add_argument("slug")

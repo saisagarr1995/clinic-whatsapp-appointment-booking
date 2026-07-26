@@ -30,7 +30,10 @@ AI/LLM inference.
 ### Non-goals (explicitly out of scope for 1.0)
 - No AI, LLM, or NLP. The bot is a deterministic finite state machine. **AI cost = ₹0.**
 - No payment gateway integration or automated payment reconciliation. Payment is UPI
-  peer-to-peer; the patient self-declares via an "I've Paid" button and clinic staff verify.
+  peer-to-peer; the patient self-declares via an "I've Paid" button, supplies the UPI
+  reference, and **clinic staff verify it against their own bank statement** using
+  `scripts/clinic_admin.py`. See §3.1.1 — this is the one place the product depends on a
+  human, and it cannot be removed without a payment gateway.
 - No admin web dashboard (deferred — see §9 Future work).
 - No shared-database multi-tenancy. **One process + one database file per clinic**, with
   many clinics on one server. See §12.
@@ -174,9 +177,36 @@ SUMMARY       full booking summary
                           (the QR image was removed 2026-07-26 — see D4)
 
 PAYMENT
- ├─ "I've Paid"  ──► PAID     (thank-you/greeting, booking marked AWAITING_VERIFICATION)
+ ├─ "I've Paid"  ──► ASK_UTR  (booking marked AWAITING_VERIFICATION immediately)
+ │                    "Type the UPI reference number"  + [Skip]
+ │      ├─ valid reference ──► PAID  (stored for staff to match)
+ │      ├─ [Skip]           ──► PAID
+ │      └─ anything else    ──► re-prompt, never dead-ends
  └─ "Need Help"  ──► HELP     (clinic mobile number) → [I've Paid]
+
+PAID    acknowledges the CLAIM only: "your payment is being verified".
+        The bot must never tell a patient their payment is confirmed.
 ```
+
+### 3.1.1 Payment verification — the boundary of what the bot can know
+
+There is no payment gateway (§1 non-goals), so **nothing in this system can observe
+that money moved.** "I've Paid" is a patient claim, and the UPI reference is
+patient-typed text. Neither is proof.
+
+`CONFIRMED` is therefore reachable *only* through a human at the clinic comparing
+the reference against the clinic's own bank/UPI statement:
+
+```
+python scripts/clinic_admin.py payments <slug>   # queue, oldest wait first
+python scripts/clinic_admin.py confirm  <slug> <REF>
+python scripts/clinic_admin.py reject   <slug> <REF>   # frees the slot
+```
+
+**A declared-but-unverified booking keeps its slot and never auto-expires.** That is
+deliberate: a patient who genuinely paid must not lose their appointment to a timer.
+The accepted cost is that a false claim occupies a slot until staff review it, which
+is why the queue exists and is sorted oldest-first. `reject` frees the slot at once.
 
 ### 3.2 Booking lifecycle
 
@@ -210,6 +240,7 @@ Nothing is installed that is not listed here.
 | `pydantic-settings` | MIT | Typed env/secret loading. |
 | `pyyaml` | MIT | Parse `clinic.yaml`. |
 | `jinja2` | BSD-3 | Payment page and simulator templates. |
+| `tzdata` | Apache-2.0 | **Added 2026-07-26.** Windows ships no IANA time zone database, so `ZoneInfo("Asia/Kolkata")` raises and the clinic timezone silently fell back to machine-local time — every slot and hold expiry computed in the wrong zone. This is the standard, CPython-documented fix. |
 | `httpx` | BSD-3 | Outbound Graph API calls. |
 
 **Zero-cost guarantee.** The bot only ever replies to a patient-initiated message, which
@@ -275,7 +306,6 @@ clinic-whatsapp-appointment-booking/
 │   ├── PROGRESS.md                      # step-by-step build log
 │   ├── SESSION_STATE.md                 # cross-session context handoff
 │   ├── LOCAL_HOSTING.md                 # laptop runbook (CAB-0014)
-│   ├── DEPLOYMENT.md                    # Oracle VM runbook
 │   └── TWO_PHONE_TEST.md
 ├── RECREATE_PROMPT.md                   # GITIGNORED — single-prompt rebuild
 ├── scripts/
@@ -407,4 +437,5 @@ repeat until green. Failures are recorded in `PROGRESS.md`, never silently patch
 | Date | Change |
 |------|--------|
 | 2026-07-20 | Initial plan created and locked. |
+| 2026-07-26 | **CAB-0015.** Payment verification closed: `CONFIRMED` was unreachable — no code path set it and an unverified claim held a slot forever with no staff tool. Added UPI-reference capture (`ASK_UTR`), `confirm`/`reject` staff commands and §3.1.1. Fixed a latent timezone bug where a blanket `except Exception` hid `ZoneInfoNotFoundError` on Windows, silently using machine-local time; added `tzdata` and validation at config load. Removed dead code (`ImageMessage`, dead `Settings` members) and the superseded process-per-clinic deploy assets. 180 → 202 tests. |
 | 2026-07-26 | **CAB-0014.** Four locked decisions amended at the user's direction: §2 "nothing runs on the laptop" (laptop is now a supported host, via Tailscale Funnel); D13 (process-per-clinic → one process, database per clinic, measured 85→87 MB for 1→5 clinics); D4 (UPI QR removed, `qrcode[pil]` and Pillow dropped); D5 superseded by Tailscale Funnel for stable webhook URLs. Added `config/clinics.yaml` fleet registry, per-clinic secrets, path-scoped `/c/<slug>/` routing, a gated offline simulator, CodeQL and Dependabot. 180 tests. |

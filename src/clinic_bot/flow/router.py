@@ -36,6 +36,22 @@ log = logging.getLogger(__name__)
 NAME_MIN = 2
 NAME_MAX = 60
 
+#: A UPI UTR is 12 digits, but banks and PSPs are inconsistent and some show a
+#: longer alphanumeric id. Accept anything plausible rather than rejecting a
+#: genuine reference — staff read it, no code depends on its shape.
+UTR_MIN = 6
+UTR_MAX = 32
+
+
+def _looks_like_utr(raw: str) -> bool:
+    cleaned = raw.replace(" ", "").replace("-", "")
+    if not (UTR_MIN <= len(cleaned) <= UTR_MAX):
+        return False
+    if not cleaned.isalnum():
+        return False
+    # Must contain digits; a bare word is someone typing a message, not a UTR.
+    return any(ch.isdigit() for ch in cleaned)
+
 
 class Router:
     def __init__(self, cfg: ClinicConfig, settings: Settings, base_url: str | None = None):
@@ -105,6 +121,7 @@ class Router:
             State.PICK_SLOT: self._st_pick_slot,
             State.SUMMARY: self._st_summary,
             State.PAYMENT: self._st_payment,
+            State.ASK_UTR: self._st_ask_utr,
             State.PAID: self._st_paid,
             State.RESCHEDULE_PICK_BOOKING: self._st_reschedule_pick,
             State.CANCEL_PICK_BOOKING: self._st_cancel_pick,
@@ -168,6 +185,8 @@ class Router:
             return self._show_summary(db, flow, to)
         if state is State.PAYMENT:
             return self._show_payment(db, flow, to)
+        if state is State.ASK_UTR:
+            return views.ask_utr(to)
         return views.welcome(to, self.cfg, flow.get("name") or "")
 
     # ------------------------------------------------------------------
@@ -482,18 +501,52 @@ class Router:
                 return views.with_menu_button(to, M.hold_expired(self.cfg))
 
             bookings.declare_paid(db, booking)
-            flow.state = State.PAID
-            return views.paid(
-                to,
-                cfg=self.cfg,
-                patient_name=booking.patient_name or flow.get("name") or "",
-                ref=booking.ref,
-                doctor_name=booking.doctor.name,
-                starts_at=booking.starts_at,
-                today=clock.today(),
-            )
+            # Ask for the UPI reference before thanking them: it is the only
+            # thing the patient can give us that helps staff find the payment.
+            flow.state = State.ASK_UTR
+            return views.ask_utr(to)
 
         return self._fallback(flow, to, db)
+
+    def _st_ask_utr(
+        self, db: Session, flow: FlowSession, inbound: InboundMessage, payload: str
+    ) -> Reply:
+        to = inbound.wa_id
+
+        if payload == ids.BTN_SKIP_UTR:
+            return self._finish_payment(db, flow, to)
+
+        if payload == ids.BTN_HELP:
+            return views.need_help(to, self.cfg)
+
+        if inbound.is_interactive:
+            return views.ask_utr(to)
+
+        raw = (inbound.text or "").strip()
+        if not _looks_like_utr(raw):
+            return views.utr_invalid(to)
+
+        booking = db.get(Booking, flow.get("booking_id") or 0)
+        if booking is not None:
+            bookings.record_payment_ref(db, booking, raw)
+        return self._finish_payment(db, flow, to)
+
+    def _finish_payment(self, db: Session, flow: FlowSession, to: str) -> Reply:
+        booking = db.get(Booking, flow.get("booking_id") or 0)
+        if booking is None:
+            return self._go_welcome(db, flow, to, note_expiry=False)
+
+        flow.state = State.PAID
+        return views.paid(
+            to,
+            cfg=self.cfg,
+            patient_name=booking.patient_name or flow.get("name") or "",
+            ref=booking.ref,
+            doctor_name=booking.doctor.name,
+            starts_at=booking.starts_at,
+            today=clock.today(),
+            payment_ref=booking.payment_ref,
+        )
 
     def _st_paid(
         self, db: Session, flow: FlowSession, inbound: InboundMessage, payload: str
