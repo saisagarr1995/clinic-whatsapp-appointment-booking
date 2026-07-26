@@ -395,3 +395,70 @@ refused.
 **Schema note.** `bookings` gained `payment_ref`, `verified_at`, `verified_by`.
 `create_all()` does not alter existing tables and there is no migration framework
 (PLAN §4), so existing databases must be recreated. Only throwaway local data existed.
+
+---
+
+# Session 4 — 2026-07-26 — CAB-0016: release to main, and the tidy after it
+
+`release/1.0` and `main` now carry CAB-0014 and CAB-0015 (PRs #2 and #3), plus four
+Dependabot bumps (#4–#7: `setup-python` 5→7, `codeql-action` 3→4, `checkout` 4→7,
+`pytest-cov` <7→<8). All merged with CI green.
+
+## CodeQL earned its place on its first run
+
+It was added in CAB-0014 and immediately blocked its own PR with four findings in
+the code that introduced it:
+
+* **Stack-trace exposure (medium ×2).** `/health` returned `str(exc)` from a broken
+  registry or clinic config. That endpoint is public through the tunnel, so a config
+  error would have leaked filesystem paths to an unauthenticated caller. Detail is now
+  logged server-side; the response carries a generic message.
+* **Log injection (medium).** Webhook-supplied message ids went straight into log
+  lines. Chasing it found a second site the first pass missed — the verification
+  handler logged `mode` directly from the query string.
+* **Clear-text logging (high).** A false positive, but caused by a local variable named
+  `secrets` shadowing the stdlib module, so the analyser treated a file path as a
+  credential. Renamed.
+
+The first log-injection fix did not clear the alert: `_safe()` filtered with a
+generator over `str.isprintable`, which is correct at runtime but opaque to taint
+tracking. Rewritten with explicit `\r\n` / `\n` / `\r` replacement — same behaviour,
+legible to the analyser. Lesson recorded: **sanitizers must be written in the form
+static analysis recognises, or the alert never clears and the fix looks ineffective.**
+
+## Branch protection had to change
+
+Merging was blocked by required status check `deployment scripts` — the shellcheck job
+CAB-0015 deleted along with the shell scripts it validated. A required check that can
+never report blocks *every* future PR, not just this one.
+
+`git-workflow` forbids changing branch protection to make something merge, so this was
+put to the user rather than done silently. With approval, `deployment scripts` was
+replaced by `analyze python` (CodeQL) on both `release/1.0` and `main`.
+`enforce_admins` stayed **enabled** — the alternative on the table was disabling it for
+an admin bypass, which would have forced one merge past a broken check and left the
+wall standing. `PROJECT_PLAN.md` §8 now documents the real check names.
+
+## A mistake worth recording
+
+`image.png` — a screenshot the user pasted into the repo root — was swept into commit
+`5aa997e` by a blanket `git add -A`, and reached the public `main`. Removed here, and
+`.gitignore` now excludes stray images **at the repo root only**, so genuine assets
+under `src/` and `docs/` are unaffected.
+
+The file remains in git history. It is a screenshot of a GitHub merge box, so there is
+nothing sensitive to rotate and history was not rewritten. **Blanket `git add -A` is
+the cause; stage deliberately when the working tree may hold unrelated files.**
+
+## Verification at promotion
+
+```
+pytest      208 passed
+ruff        All checks passed
+bandit      No issues identified
+pip-audit   No known vulnerabilities found
+CodeQL      No open alerts
+```
+
+Still true, and still the headline caveat: **nothing in this project has been run
+against real WhatsApp.** No Meta credentials exist, so no clinic is live.

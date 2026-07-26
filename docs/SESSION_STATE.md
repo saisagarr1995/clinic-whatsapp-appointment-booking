@@ -11,7 +11,7 @@
 |-------|-------|
 | Last updated | 2026-07-26 |
 | Current phase | Multi-clinic fleet complete incl. staff payment verification; never run against real WhatsApp |
-| Current branch | `feature/CAB-0014` (CAB-0015 committed on the same branch) |
+| Current branch | `release/1.0` — CAB-0014/0015/0016 merged and promoted to `main` |
 | Repository | https://github.com/saisagarr1995/clinic-whatsapp-appointment-booking |
 | Overall status | 🟢 Fleet runs on the laptop and the full flow is proven in the simulator · 🟡 Never run against real WhatsApp |
 | Blockers | Meta credentials do not exist yet — needs the user |
@@ -115,6 +115,7 @@ wizard reflects what the process actually turned out to be.
 | CAB-0013 | Session handoff after initial build | ✅ done |
 | CAB-0014 | Laptop hosting, clinic registry, simulator, QR removal | ✅ done |
 | CAB-0015 | Payment verification, timezone fix, dead-code removal | ✅ done |
+| CAB-0016 | Post-release tidy: stray screenshot, documented required checks | ✅ done |
 
 ---
 

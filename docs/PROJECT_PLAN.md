@@ -350,6 +350,8 @@ Each row is one `feature/CAB-XXXX` branch cut **from `release/1.0`**, merged bac
 | CAB-0011 | `feature/CAB-0011` | One-command clinic onboarding wizard (§10) | A non-technical operator gets from clone to live bot without editing code |
 | CAB-0012 | `feature/CAB-0012` | Production deployment: systemd unit, Caddy, backups, deploy pipeline (§11) | Bot survives a VM reboot and a redeploy without losing bookings |
 | CAB-0014 | `feature/CAB-0014` | Laptop hosting: clinic registry, one process + DB per clinic, offline simulator, QR removal, CodeQL + Dependabot | Fleet serves many clinics from one process; cross-clinic isolation proven by test; full flow validated with no Meta account |
+| CAB-0015 | `feature/CAB-0014` | Staff payment verification, timezone correctness, dead-code removal | `CONFIRMED` reachable only via staff review; timezone validated at config load |
+| CAB-0016 | `feature/CAB-0016` | Post-release tidy: remove a stray committed screenshot, correct the documented required checks | Repo carries no stray binaries; §8 matches actual branch protection |
 
 ---
 
@@ -413,7 +415,10 @@ repeat until green. Failures are recorded in `PROGRESS.md`, never silently patch
 - `main` and `release/1.0` both protected:
   - No direct pushes (including by admins — enforce-admins ON).
   - PR required, ≥1 approval, stale approvals dismissed on new commits.
-  - Required status check: `ci`.
+  - Required status checks: `lint, test, security` and `analyze python` (CodeQL).
+    Updated 2026-07-26: the previous `deployment scripts` check was removed with the
+    shell scripts it validated, and a required check that can never report blocks
+    every future PR.
   - Force-push and branch deletion blocked.
   - Conversation resolution required.
 - Merge path is strictly `feature/CAB-XXXX → release/1.0 → main`.
